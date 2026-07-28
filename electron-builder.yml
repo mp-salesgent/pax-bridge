@@ -44,7 +44,12 @@ mac:
   identity: null
 
 dmg:
-  title: "Salesgent Pax Bridge ${version}"
+  # ${arch} is required here: electron-builder builds the arm64 and x64 dmg
+  # in parallel, and hdiutil mounts each one as a volume named after this
+  # title. Without ${arch} both builds fight over a volume named identically
+  # ("Salesgent Pax Bridge 1.0.0"), and whichever loses gets "resource busy"
+  # trying to detach the other's mount — this is what broke the last release.
+  title: "Salesgent Pax Bridge ${version} ${arch}"
 
 win:
   target:

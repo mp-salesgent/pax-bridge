@@ -1,0 +1,15 @@
+{
+  "name": "pax-bridge-core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PAX Bridge — local Express server for live BroadPOS terminals (embedded in the desktop app).",
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "serialport": "^12.0.0",
+    "ws": "^8.21.0"
+  }
+}

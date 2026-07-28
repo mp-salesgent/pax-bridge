@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http://localhost:* http://127.0.0.1:*; img-src 'self' data:;" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PAX Bridge</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">P</div>
+        <div>
+          <div class="brand-name">PAX Bridge</div>
+          <div class="brand-sub" id="appMeta">—</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">…</span></span>
+        <button class="btn ghost" id="btnUpdate">Check for updates</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="status">Status</button>
+      <button class="tab" data-tab="terminals">Terminals</button>
+      <button class="tab" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="logs">Logs</button>
+    </nav>
+
+    <main>
+      <!-- STATUS -->
+      <section class="panel active" data-panel="status">
+        <div class="grid">
+          <div class="card span2">
+            <div class="card-head"><h3>Bridge server</h3><span class="mono" id="bridgeUrl">—</span></div>
+            <p class="muted">The bridge runs on this computer and talks to your PAX terminal over the LAN. Keep the app running while taking payments.</p>
+            <div class="row gap">
+              <button class="btn primary" id="btnStart">Start</button>
+              <button class="btn" id="btnStop">Stop</button>
+              <button class="btn" id="btnRestart">Restart</button>
+              <button class="btn ghost" id="btnOpen">Open in browser</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>At a glance</h3></div>
+            <ul class="kv">
+              <li><span>Status</span><b id="glanceStatus">—</b></li>
+              <li><span>Port</span><b id="glancePort">—</b></li>
+              <li><span>Terminals</span><b id="glanceTerminals">—</b></li>
+              <li><span>Version</span><b id="glanceVersion">—</b></li>
+            </ul>
+            <button class="btn ghost sm" id="btnData">Open data folder</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TERMINALS -->
+      <section class="panel" data-panel="terminals">
+        <div class="grid">
+          <div class="card">
+            <div class="card-head"><h3>Add / edit terminal</h3></div>
+            <form id="termForm" class="form">
+              <label>Name<input name="name" placeholder="Front Counter" required /></label>
+              <label>Model
+                <select name="model">
+                  <option>A920 Pro</option>
+                  <option>A35</option>
+                </select>
+              </label>
+              <div class="row gap">
+                <label class="grow">Terminal IP<input name="ip" placeholder="192.168.1.50" required /></label>
+                <label style="width:110px">Port<input name="port" type="number" value="10009" /></label>
+              </div>
+              <div class="row gap">
+                <button class="btn primary" type="submit">Save terminal</button>
+                <button class="btn" type="button" id="btnClearForm">Clear</button>
+              </div>
+              <div class="form-msg" id="termMsg"></div>
+            </form>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Saved terminals</h3><button class="btn ghost sm" id="btnReloadTerms">Refresh</button></div>
+            <div id="termList" class="term-list"><p class="muted">Loading…</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="panel" data-panel="settings">
+        <div class="card span2">
+          <div class="card-head"><h3>Options</h3></div>
+          <div class="setting">
+            <div><b>Bridge port</b><p class="muted">The local port the bridge listens on. Restart to apply.</p></div>
+            <input id="setPort" type="number" min="1" max="65535" />
+          </div>
+          <div class="setting">
+            <div><b>Launch at login</b><p class="muted">Start PAX Bridge automatically when this computer starts.</p></div>
+            <label class="switch"><input id="setLogin" type="checkbox" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><b>Start bridge on launch</b><p class="muted">Begin serving as soon as the app opens.</p></div>
+            <label class="switch"><input id="setAutostart" type="checkbox" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><b>Keep running in tray</b><p class="muted">Closing the window keeps the bridge alive in the menu bar / tray.</p></div>
+            <label class="switch"><input id="setTray" type="checkbox" /><span></span></label>
+          </div>
+          <div class="setting">
+            <div><b>Automatic updates</b><p class="muted">Check GitHub for new versions and notify you.</p></div>
+            <label class="switch"><input id="setAutoUpdate" type="checkbox" /><span></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- LOGS -->
+      <section class="panel" data-panel="logs">
+        <div class="card span2 tall">
+          <div class="card-head"><h3>Live logs</h3><button class="btn ghost sm" id="btnClearLogs">Clear</button></div>
+          <pre id="logView" class="logs"></pre>
+        </div>
+      </section>
+    </main>
+
+    <!-- Update toast -->
+    <div class="toast" id="updateToast" hidden>
+      <div class="toast-body">
+        <b id="toastTitle">Update</b>
+        <p id="toastMsg" class="muted"></p>
+        <div class="progress" id="toastProgress" hidden><div id="toastBar"></div></div>
+      </div>
+      <div class="toast-actions" id="toastActions"></div>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

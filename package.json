@@ -1,0 +1,33 @@
+{
+  "name": "pax-bridge-desktop",
+  "productName": "PAX Bridge",
+  "version": "1.0.0",
+  "description": "Installable, auto-updating desktop app that runs the PAX payment bridge on a store computer.",
+  "author": "Salesgent",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "icons": "node build/make-icons.mjs",
+    "bridge:install": "npm --prefix bridge install --omit=dev --no-audit --no-fund",
+    "prepare:build": "npm run icons && npm run bridge:install",
+    "pack": "npm run prepare:build && electron-builder --dir",
+    "dist": "npm run prepare:build && electron-builder",
+    "dist:mac": "npm run prepare:build && electron-builder --mac",
+    "dist:win": "npm run prepare:build && electron-builder --win",
+    "dist:all": "npm run prepare:build && electron-builder -mwl",
+    "create:dmg": "npm run prepare:build && electron-builder --mac dmg",
+    "create:exe": "npm run prepare:build && electron-builder --win nsis",
+    "create:all": "npm run prepare:build && electron-builder --mac dmg --win nsis",
+    "release": "npm run prepare:build && electron-builder --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  }
+}

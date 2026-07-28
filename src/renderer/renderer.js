@@ -1,0 +1,223 @@
+/* global pax */
+const $ = (id) => document.getElementById(id);
+const state = { port: 5000, status: 'stopped', appVersion: '—' };
+
+// ---- tabs -----------------------------------------------------------------
+document.querySelectorAll('.tab').forEach((t) => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach((x) => x.classList.remove('active'));
+    t.classList.add('active');
+    document.querySelector(`.panel[data-panel="${t.dataset.tab}"]`).classList.add('active');
+    if (t.dataset.tab === 'terminals') loadTerminals();
+  });
+});
+
+// ---- status ---------------------------------------------------------------
+function paintStatus(s) {
+  state.status = s.status;
+  state.port = s.port ?? state.port;
+  const pill = $('statusPill');
+  pill.className = `status-pill ${s.status}`;
+  $('statusText').textContent = s.status;
+  $('glanceStatus').textContent = s.status;
+  $('glancePort').textContent = state.port;
+  $('bridgeUrl').textContent = `http://localhost:${state.port}`;
+  const running = s.status === 'running';
+  $('btnStart').disabled = running || s.status === 'starting';
+  $('btnStop').disabled = !running && s.status !== 'error';
+  $('btnOpen').disabled = !running;
+}
+
+async function refreshState() {
+  paintStatus(await pax.bridge.state());
+  const info = await pax.app.info();
+  state.appVersion = info.version;
+  $('glanceVersion').textContent = `v${info.version}`;
+  $('appMeta').textContent = `v${info.version} · Electron ${info.electron} · ${info.platform}`;
+}
+
+$('btnStart').addEventListener('click', () => pax.bridge.start(state.port));
+$('btnStop').addEventListener('click', () => pax.bridge.stop());
+$('btnRestart').addEventListener('click', () => pax.bridge.restart(state.port));
+$('btnOpen').addEventListener('click', () => pax.app.openExternal(`http://localhost:${state.port}`));
+$('btnData').addEventListener('click', () => pax.app.openUserData());
+
+pax.bridge.onStatus(paintStatus);
+
+// ---- terminals (talk to the local bridge REST API) ------------------------
+const api = (path, opts) => fetch(`http://localhost:${state.port}/api${path}`, opts).then(async (r) => {
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body?.error?.message || `HTTP ${r.status}`);
+  return body;
+});
+
+async function loadTerminals() {
+  const list = $('termList');
+  if (state.status !== 'running') {
+    list.innerHTML = '<p class="muted">Start the bridge to manage terminals.</p>';
+    $('glanceTerminals').textContent = '—';
+    return;
+  }
+  try {
+    const { terminals } = await api('/terminals');
+    $('glanceTerminals').textContent = terminals.length;
+    list.innerHTML = terminals.length
+      ? ''
+      : '<p class="muted">No terminals yet. Add one on the left.</p>';
+    for (const t of terminals) list.appendChild(termRow(t));
+  } catch (e) {
+    list.innerHTML = `<p class="muted">Could not load: ${e.message}</p>`;
+  }
+}
+
+function termRow(t) {
+  const el = document.createElement('div');
+  el.className = 'term';
+  el.innerHTML = `
+    <div>
+      <div><b>${escapeHtml(t.name)}</b> <span class="badge" data-badge>?</span></div>
+      <small>${escapeHtml(t.model || '')} · ${escapeHtml(t.ip || 'LAN')}:${t.port || ''}</small>
+    </div>
+    <div class="term-actions">
+      <button class="btn sm" data-test>Test</button>
+      <button class="btn sm ghost" data-del>Delete</button>
+    </div>`;
+  el.querySelector('[data-test]').addEventListener('click', async (ev) => {
+    const badge = el.querySelector('[data-badge]');
+    ev.target.disabled = true; badge.textContent = '…'; badge.className = 'badge';
+    try {
+      await api(`/terminals/${t.id}/ping`, { method: 'POST' });
+      badge.textContent = 'online'; badge.className = 'badge on';
+    } catch (e) {
+      badge.textContent = 'offline'; badge.className = 'badge off'; badge.title = e.message;
+    } finally { ev.target.disabled = false; }
+  });
+  el.querySelector('[data-del]').addEventListener('click', async () => {
+    if (!confirm(`Delete terminal "${t.name}"?`)) return;
+    await api(`/terminals/${t.id}`, { method: 'DELETE' });
+    loadTerminals();
+  });
+  return el;
+}
+
+$('termForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('termMsg');
+  msg.textContent = ''; msg.className = 'form-msg';
+  const fd = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    await api('/terminals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: fd.name, model: fd.model, connType: 'tcp',
+        ip: fd.ip, port: Number(fd.port) || 10009,
+      }),
+    });
+    msg.textContent = 'Saved.'; msg.className = 'form-msg ok';
+    e.target.reset();
+    loadTerminals();
+  } catch (err) {
+    msg.textContent = err.message; msg.className = 'form-msg err';
+  }
+});
+$('btnClearForm').addEventListener('click', () => $('termForm').reset());
+$('btnReloadTerms').addEventListener('click', loadTerminals);
+
+// ---- settings -------------------------------------------------------------
+async function loadSettings() {
+  const s = await pax.settings.get();
+  $('setPort').value = s.port;
+  $('setLogin').checked = s.launchAtLogin;
+  $('setAutostart').checked = s.startBridgeOnLaunch;
+  $('setTray').checked = s.minimizeToTray;
+  $('setAutoUpdate').checked = s.autoUpdate;
+}
+const bindToggle = (id, key) => $(id).addEventListener('change', (e) => pax.settings.set({ [key]: e.target.checked }));
+bindToggle('setLogin', 'launchAtLogin');
+bindToggle('setAutostart', 'startBridgeOnLaunch');
+bindToggle('setTray', 'minimizeToTray');
+bindToggle('setAutoUpdate', 'autoUpdate');
+$('setPort').addEventListener('change', async (e) => {
+  const port = Math.max(1, Math.min(65535, Number(e.target.value) || 5000));
+  e.target.value = port;
+  await pax.settings.set({ port });
+  if (state.status === 'running') pax.bridge.restart(port);
+});
+
+// ---- logs -----------------------------------------------------------------
+const logView = $('logView');
+function appendLog(entry) {
+  const time = new Date(entry.ts).toLocaleTimeString();
+  const cls = entry.stream === 'err' ? 'l-err' : entry.stream === 'sys' ? 'l-sys' : '';
+  const line = document.createElement('div');
+  line.className = cls;
+  line.innerHTML = `<span class="l-time">${time}</span>  ${escapeHtml(entry.line)}`;
+  logView.appendChild(line);
+  while (logView.childElementCount > 800) logView.removeChild(logView.firstChild);
+  logView.scrollTop = logView.scrollHeight;
+}
+pax.bridge.onLog(appendLog);
+$('btnClearLogs').addEventListener('click', () => (logView.innerHTML = ''));
+
+// ---- updates --------------------------------------------------------------
+const toast = $('updateToast');
+function showToast(title, msg, actions = [], progress = false) {
+  $('toastTitle').textContent = title;
+  $('toastMsg').textContent = msg;
+  $('toastProgress').hidden = !progress;
+  const wrap = $('toastActions');
+  wrap.innerHTML = '';
+  for (const a of actions) {
+    const b = document.createElement('button');
+    b.className = `btn sm ${a.primary ? 'primary' : 'ghost'}`;
+    b.textContent = a.label; b.onclick = a.onClick;
+    wrap.appendChild(b);
+  }
+  toast.hidden = false;
+}
+const hideToast = () => (toast.hidden = true);
+
+$('btnUpdate').addEventListener('click', () => pax.updates.check());
+
+pax.updates.onEvent((e) => {
+  switch (e.type) {
+    case 'checking': showToast('Checking for updates…', 'Contacting the release server.', [], false); break;
+    case 'none': showToast('You’re up to date', `Version ${e.current} is the latest.`, [{ label: 'OK', onClick: hideToast }]); break;
+    case 'available':
+      showToast(`Update available — v${e.version}`, 'A new version is ready to download.', [
+        { label: 'Later', onClick: hideToast },
+        { label: 'Download', primary: true, onClick: () => pax.updates.download() },
+      ]);
+      break;
+    case 'progress':
+      showToast('Downloading update…', `${e.percent}% · ${(e.bytesPerSecond / 1e6).toFixed(1)} MB/s`, [], true);
+      $('toastBar').style.width = `${e.percent}%`;
+      break;
+    case 'downloaded':
+      showToast(`Ready to install — v${e.version}`, 'The update will apply on restart.', [
+        { label: 'Later', onClick: hideToast },
+        { label: 'Restart & install', primary: true, onClick: () => pax.updates.install() },
+      ]);
+      break;
+    case 'dev': showToast('Dev mode', e.message, [{ label: 'OK', onClick: hideToast }]); break;
+    case 'error': showToast('Update error', e.message, [{ label: 'Dismiss', onClick: hideToast }]); break;
+    default: break;
+  }
+});
+
+// ---- utils ----------------------------------------------------------------
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---- boot -----------------------------------------------------------------
+(async function boot() {
+  await refreshState();
+  await loadSettings();
+  // hydrate log view with any buffered lines
+  (await pax.bridge.logs()).forEach(appendLog);
+  // poll terminal count on the status page while running
+  setInterval(() => { if (state.status === 'running') loadTerminals(); }, 8000);
+})();

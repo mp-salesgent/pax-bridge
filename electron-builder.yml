@@ -1,0 +1,72 @@
+appId: com.salesgent.paxbridge
+productName: PAX Bridge
+copyright: Copyright © Salesgent
+
+directories:
+  buildResources: build
+  output: release
+
+# App code that goes inside the asar. The bridge server ships separately as an
+# unpacked resource (below) because it runs as its own Node process.
+files:
+  - src/**/*
+  - package.json
+  - "!**/*.map"
+
+# The embedded PAX bridge (Express server + its production node_modules) is
+# copied verbatim next to the app so utilityProcess can fork bridge/index.js.
+# Run `npm run bridge:install` first (dist scripts do this) to populate its deps.
+extraResources:
+  - from: bridge
+    to: bridge
+    filter:
+      - "**/*"
+      - "!**/*.md"
+      - "!**/.env"
+      - "!**/data/**"
+
+asar: true
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip           # zip target is required for electron-updater on mac
+      arch: [arm64, x64]
+  category: public.app-category.point-of-sale
+  icon: build/icon.icns
+  artifactName: "PAX-Bridge-${version}-${arch}.${ext}"
+  # Unsigned builds run after a right-click → Open. Add identity + notarize later.
+  identity: null
+
+dmg:
+  title: "PAX Bridge ${version}"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: "PAX-Bridge-Setup-${version}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PAX Bridge
+
+linux:
+  target: [AppImage]
+  category: Utility
+  icon: build/icon.png
+
+# Auto-update feed. electron-updater reads releases from this GitHub repo.
+# Create the repo (or point owner/repo at an existing one) and publish with
+# `npm run release` (needs a GH_TOKEN with repo scope).
+publish:
+  provider: github
+  owner: mp-salesgent
+  repo: pax-bridge
+  releaseType: release

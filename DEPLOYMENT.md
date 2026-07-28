@@ -145,17 +145,23 @@ you're ready for customers to receive it.
 
 ## 5. Release with CI (mac + Windows together)
 
-Recommended so every release ships both platforms without local wine. Create
-`.github/workflows/release.yml` in the releases repo:
+Already set up — [`.github/workflows/release.yml`](.github/workflows/release.yml)
+builds mac + Windows on their own native runners (no wine) and publishes both
+to the same GitHub Release, triggered by pushing a `v*` tag or manually from
+the Actions tab (`workflow_dispatch`):
 
 ```yaml
 name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write   # lets the built-in GITHUB_TOKEN publish the Release
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -169,6 +175,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+> **One-time repo setting**: if the workflow fails with a 403/permission error
+> on publish, go to **Settings → Actions → General → Workflow permissions** and
+> select **"Read and write permissions"**. The `permissions: contents: write`
+> block above requests it, but a repo-level setting can still cap it.
 
 Then release by pushing a tag:
 

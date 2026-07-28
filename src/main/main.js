@@ -1,9 +1,14 @@
+const fs = require('node:fs');
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
 const store = require('./store');
 const { Bridge } = require('./bridge');
 const { createTray } = require('./tray');
 const { initUpdater } = require('./updater');
+
+const APP_TITLE = 'Salesgent Pax Bridge';
+// Fixed on purpose — not user-configurable (see registerIpc's settings:set guard).
+const BRIDGE_PORT = 5000;
 
 // Single-instance: a second launch just focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
@@ -29,7 +34,7 @@ function createWindow() {
     minHeight: 600,
     show: false,
     backgroundColor: '#0b0f1a',
-    title: 'PAX Bridge',
+    title: APP_TITLE,
     icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -95,7 +100,7 @@ app.whenReady().then(async () => {
   tray = createTray({
     onShow: showWindow,
     onQuit: quit,
-    onRestart: () => bridge.restart(),
+    onRestart: () => bridge.restart(BRIDGE_PORT),
     getState: () => bridge.getState(),
   });
 
@@ -103,7 +108,7 @@ app.whenReady().then(async () => {
 
   registerIpc();
 
-  if (settings.startBridgeOnLaunch) bridge.start(settings.port);
+  if (settings.startBridgeOnLaunch) bridge.start(BRIDGE_PORT);
 });
 
 // Keep running in the tray after the last window closes.
@@ -137,16 +142,36 @@ function registerIpc() {
     packaged: app.isPackaged,
   }));
 
+  // The bridge port is fixed (BRIDGE_PORT) — never taken from the renderer,
+  // so nothing in the UI (or a compromised page) can move it.
   ipcMain.handle('bridge:state', () => bridge.getState());
   ipcMain.handle('bridge:logs', () => bridge.logs);
-  ipcMain.handle('bridge:start', (_e, port) => bridge.start(port ?? store.read().port));
+  ipcMain.handle('bridge:start', () => bridge.start(BRIDGE_PORT));
   ipcMain.handle('bridge:stop', () => bridge.stop());
-  ipcMain.handle('bridge:restart', (_e, port) => bridge.restart(port));
+  ipcMain.handle('bridge:restart', () => bridge.restart(BRIDGE_PORT));
+
+  // Full, unbounded log history (every payment event ever logged) exported to
+  // a file the merchant picks — not just the ~500-line in-memory buffer.
+  ipcMain.handle('logs:download', async () => {
+    const content = bridge.readAllLogs();
+    if (!content) return { ok: false, reason: 'empty' };
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save Salesgent Pax Bridge logs',
+      defaultPath: path.join(app.getPath('desktop'), `salesgent-pax-bridge-logs-${stamp}.log`),
+      filters: [{ name: 'Log file', extensions: ['log', 'txt'] }],
+    });
+    if (canceled || !filePath) return { ok: false, reason: 'cancelled' };
+    fs.writeFileSync(filePath, content);
+    return { ok: true, filePath };
+  });
 
   ipcMain.handle('settings:get', () => store.read());
   ipcMain.handle('settings:set', (_e, patch) => {
-    const next = store.write(patch || {});
-    if ('launchAtLogin' in (patch || {})) applyLoginItem(next.launchAtLogin);
+    // Port is not a user setting — strip it even if a caller tries to sneak it in.
+    const { port: _ignoredPort, ...safePatch } = patch || {};
+    const next = store.write(safePatch);
+    if ('launchAtLogin' in safePatch) applyLoginItem(next.launchAtLogin);
     return next;
   });
 

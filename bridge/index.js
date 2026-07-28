@@ -573,6 +573,8 @@ const WS_STATE = {
  * @param {(ecrRefNum, onState) => Promise<object>} p.invoke - calls the service
  * @param {import('express').Response} res
  */
+const fmtMoney = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
+
 async function runPayment({ terminal, type, amountCents, tipCents = 0, orderRef, extra = {}, invoke }, res) {
   // Fail fast if the terminal is already busy (do not queue payments blindly).
   if (isTerminalBusy(terminal)) {
@@ -593,6 +595,13 @@ async function runPayment({ terminal, type, amountCents, tipCents = 0, orderRef,
     status: 'PENDING',
     ...extra,
   });
+
+  // Audit trail: every payment attempt, in full, so it survives in the
+  // downloadable logs even if the DB record is never inspected.
+  console.log(
+    `[payment] ${type} started — txnId=${txn.id} ecrRefNum=${ecrRefNum} terminal="${terminal.name}" ` +
+      `amount=${fmtMoney(amountCents)} tip=${fmtMoney(tipCents)} orderRef=${orderRef || '-'}`,
+  );
 
   const emit = (type_, payload = {}) => emitPaymentEvent({ type: type_, txnId: txn.id, ecrRefNum, ...payload });
 
@@ -618,6 +627,12 @@ async function runPayment({ terminal, type, amountCents, tipCents = 0, orderRef,
       cardType: result.cardType,
       approvedAmountCents: result.approvedAmountCents,
     });
+    console.log(
+      `[payment] ${type} ${status} — txnId=${txn.id} ecrRefNum=${ecrRefNum} terminal="${terminal.name}" ` +
+        `amount=${fmtMoney(result.approvedAmountCents ?? amountCents)} authCode=${result.authCode || '-'} ` +
+        `card=${result.cardType || '-'} last4=${result.last4 || '-'} resultCode=${result.resultCode || '-'} ` +
+        `resultTxt="${result.resultTxt || ''}"`,
+    );
     emit(status, { result });
     res.status(status === 'APPROVED' ? 200 : 402).json({ transaction: updated, result });
     return updated;
@@ -629,6 +644,10 @@ async function runPayment({ terminal, type, amountCents, tipCents = 0, orderRef,
         unknown: true,
         error: { code: 'TIMEOUT', message: err.message },
       });
+      console.error(
+        `[payment] ${type} TIMEOUT — txnId=${txn.id} ecrRefNum=${ecrRefNum} terminal="${terminal.name}" ` +
+          `amount=${fmtMoney(amountCents)} — CARD MAY HAVE BEEN CHARGED, verify on the terminal before retrying.`,
+      );
       emit('TIMEOUT', { txnId: txn.id });
       const { body } = toHttpError(err);
       res.status(504).json({ transaction: updated, ...body });
@@ -639,6 +658,10 @@ async function runPayment({ terminal, type, amountCents, tipCents = 0, orderRef,
       status: 'ERROR',
       error: { code: err.code || 'ERROR', message: err.message },
     });
+    console.error(
+      `[payment] ${type} ERROR — txnId=${txn.id} ecrRefNum=${ecrRefNum} terminal="${terminal.name}" ` +
+        `amount=${fmtMoney(amountCents)} code=${err.code || 'ERROR'} message="${err.message || ''}"`,
+    );
     emit('ERROR', { error: { code: err.code || 'ERROR', message: err.message } });
     const { status, body } = toHttpError(err);
     res.status(status).json({ transaction: updated, ...body });

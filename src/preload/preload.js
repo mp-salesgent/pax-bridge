@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('pax', {
     onLog: on('bridge:log'),
     onStatus: on('bridge:status'),
   },
+  logs: {
+    download: () => ipcRenderer.invoke('logs:download'),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),

@@ -1,4 +1,4 @@
-# PAX Bridge — Deployment Guide
+# Salesgent Pax Bridge — Deployment Guide
 
 How to build the installers (`.dmg` for macOS, `.exe` for Windows) and ship
 auto-updating releases to customers.
@@ -48,7 +48,7 @@ npm run dist:mac
 **What happens**
 
 1. `prepare:build` → regenerates `build/` icons + installs bridge deps.
-2. `electron-builder --mac` → builds `PAX Bridge.app` for **arm64 and x64**,
+2. `electron-builder --mac` → builds `Salesgent Pax Bridge.app` for **arm64 and x64**,
    wraps each in a `.dmg`, and also emits a `.zip` (required for auto-update).
 
 **Output** → `release/`
@@ -186,7 +186,7 @@ uploads to the same GitHub Release.
 
 ## 6. What the customer does
 
-**macOS** — download the `.dmg` for their chip → open it → drag **PAX Bridge**
+**macOS** — download the `.dmg` for their chip → open it → drag **Salesgent Pax Bridge**
 to Applications → first launch: right-click the app → **Open** (unsigned app).
 
 **Windows** — download `PAX-Bridge-Setup-<ver>.exe` → run it → on the SmartScreen

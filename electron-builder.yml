@@ -1,5 +1,5 @@
 appId: com.salesgent.paxbridge
-productName: PAX Bridge
+productName: Salesgent Pax Bridge
 copyright: Copyright © Salesgent
 
 directories:
@@ -35,14 +35,16 @@ mac:
       arch: [arm64, x64]
   category: public.app-category.point-of-sale
   icon: build/icon.icns
-  # No ${version} in the name: GitHub's /releases/latest/download/<name> redirect
-  # needs a stable filename to always serve the newest release.
+  # Artifact filenames intentionally do NOT change with the product rename:
+  # they're stable (no ${version}) so GitHub's /releases/latest/download/<name>
+  # redirect keeps working, and the ERP's download buttons already link to
+  # these exact names (PAX-Bridge-mac-${arch}.dmg / PAX-Bridge-Setup.exe).
   artifactName: "PAX-Bridge-mac-${arch}.${ext}"
   # Unsigned builds run after a right-click → Open. Add identity + notarize later.
   identity: null
 
 dmg:
-  title: "PAX Bridge ${version}"
+  title: "Salesgent Pax Bridge ${version}"
 
 win:
   target:
@@ -57,7 +59,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: PAX Bridge
+  shortcutName: Salesgent Pax Bridge
 
 linux:
   target: [AppImage]

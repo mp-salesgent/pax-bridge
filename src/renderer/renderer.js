@@ -29,12 +29,14 @@ function paintStatus(s) {
   $('btnOpen').disabled = !running;
 }
 
+const PLATFORM_NAME = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+
 async function refreshState() {
   paintStatus(await pax.bridge.state());
   const info = await pax.app.info();
   state.appVersion = info.version;
   $('glanceVersion').textContent = `v${info.version}`;
-  $('appMeta').textContent = `v${info.version} · Electron ${info.electron} · ${info.platform}`;
+  $('appMeta').textContent = `v${info.version} · ${PLATFORM_NAME[info.platform] || info.platform}`;
 }
 
 $('btnStart').addEventListener('click', () => pax.bridge.start(state.port));
@@ -128,7 +130,6 @@ $('btnReloadTerms').addEventListener('click', loadTerminals);
 // ---- settings -------------------------------------------------------------
 async function loadSettings() {
   const s = await pax.settings.get();
-  $('setPort').value = s.port;
   $('setLogin').checked = s.launchAtLogin;
   $('setAutostart').checked = s.startBridgeOnLaunch;
   $('setTray').checked = s.minimizeToTray;
@@ -139,12 +140,6 @@ bindToggle('setLogin', 'launchAtLogin');
 bindToggle('setAutostart', 'startBridgeOnLaunch');
 bindToggle('setTray', 'minimizeToTray');
 bindToggle('setAutoUpdate', 'autoUpdate');
-$('setPort').addEventListener('change', async (e) => {
-  const port = Math.max(1, Math.min(65535, Number(e.target.value) || 5000));
-  e.target.value = port;
-  await pax.settings.set({ port });
-  if (state.status === 'running') pax.bridge.restart(port);
-});
 
 // ---- logs -----------------------------------------------------------------
 const logView = $('logView');
@@ -161,11 +156,27 @@ function appendLog(entry) {
 pax.bridge.onLog(appendLog);
 $('btnClearLogs').addEventListener('click', () => (logView.innerHTML = ''));
 
+$('btnDownloadLogs').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await pax.logs.download();
+    if (res.ok) alert(`Logs saved to:\n${res.filePath}`);
+    else if (res.reason === 'empty') alert('No logs yet — start the bridge and process a payment first.');
+  } finally {
+    btn.disabled = false; btn.textContent = original;
+  }
+});
+
 // ---- updates --------------------------------------------------------------
 const toast = $('updateToast');
 function showToast(title, msg, actions = [], progress = false) {
   $('toastTitle').textContent = title;
-  $('toastMsg').textContent = msg;
+  // Defensive cap: never let a raw error dump balloon the toast, even if
+  // something upstream slips a multi-line message through.
+  const text = String(msg ?? '');
+  $('toastMsg').textContent = text.length > 300 ? `${text.slice(0, 300)}…` : text;
   $('toastProgress').hidden = !progress;
   const wrap = $('toastActions');
   wrap.innerHTML = '';
@@ -177,7 +188,8 @@ function showToast(title, msg, actions = [], progress = false) {
   }
   toast.hidden = false;
 }
-const hideToast = () => (toast.hidden = true);
+const hideToast = () => { toast.hidden = true; };
+$('toastClose').addEventListener('click', hideToast);
 
 $('btnUpdate').addEventListener('click', () => pax.updates.check());
 

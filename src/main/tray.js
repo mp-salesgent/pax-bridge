@@ -13,14 +13,14 @@ function trayIcon() {
 
 function createTray({ onShow, onQuit, getState, onRestart }) {
   const tray = new Tray(trayIcon());
-  tray.setToolTip('PAX Bridge');
+  tray.setToolTip('Salesgent Pax Bridge');
 
   const rebuild = () => {
     const s = getState();
     const dot = s.status === 'running' ? '🟢' : s.status === 'error' ? '🔴' : '⚪️';
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: `PAX Bridge — ${dot} ${s.status}`, enabled: false },
+        { label: `Salesgent Pax Bridge — ${dot} ${s.status}`, enabled: false },
         { label: `localhost:${s.port}`, enabled: false },
         { type: 'separator' },
         { label: 'Open window', click: onShow },

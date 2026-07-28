@@ -6,8 +6,9 @@ const { app } = require('electron');
 
 const FILE = path.join(app.getPath('userData'), 'settings.json');
 
+// Note: the bridge port is NOT a user setting — it's fixed (BRIDGE_PORT in
+// main.js) and settings:set strips any "port" key before it reaches write().
 const DEFAULTS = {
-  port: 5000,
   launchAtLogin: false,
   autoUpdate: true,
   startBridgeOnLaunch: true,

@@ -1,4 +1,4 @@
-# PAX Bridge — desktop app
+# Salesgent Pax Bridge — desktop app
 
 An installable, **auto-updating** Electron desktop app that runs the PAX payment
 bridge on a store computer. It wraps the Express bridge (`bridge/`) in a real

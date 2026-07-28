@@ -2,13 +2,22 @@
 //
 // The bridge runs in a separate Node context via Electron's utilityProcess, so
 // a crash in the payment server can never take down the UI. We stream its
-// stdout/stderr to the renderer as live logs and poll /api/health to know when
-// it's actually accepting connections.
+// stdout/stderr to the renderer as live logs, persist every line to a rotating
+// daily file (so the full payment history survives restarts and can be
+// exported), and poll /api/health to know when it's actually accepting
+// connections.
+const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const { app, utilityProcess } = require('electron');
 
-const MAX_LOG_LINES = 500;
+const MAX_LOG_LINES = 500; // in-memory buffer shown live in the UI
+
+function todayLogFile(logsDir) {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return path.join(logsDir, `bridge-${stamp}.log`);
+}
 
 class Bridge {
   constructor({ onLog, onStatus }) {
@@ -18,6 +27,8 @@ class Bridge {
     this.logs = [];
     this.onLog = onLog || (() => {});
     this.onStatus = onStatus || (() => {});
+    this.logsDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(this.logsDir, { recursive: true });
   }
 
   /** Absolute path to bridge/index.js in dev and when packaged. */
@@ -41,6 +52,41 @@ class Bridge {
     this.logs.push(entry);
     if (this.logs.length > MAX_LOG_LINES) this.logs.shift();
     this.onLog(entry);
+    this._appendToFile(entry);
+  }
+
+  /** Append one line to today's rotating log file (full, unbounded history). */
+  _appendToFile(entry) {
+    try {
+      const time = new Date(entry.ts).toISOString();
+      const tag = entry.stream === 'err' ? 'ERR' : entry.stream === 'sys' ? 'SYS' : 'OUT';
+      fs.appendFileSync(todayLogFile(this.logsDir), `${time} [${tag}] ${entry.line}\n`);
+    } catch (err) {
+      // Never let a disk/logging failure take down the bridge.
+      console.error('[bridge] failed to write log file:', err.message);
+    }
+  }
+
+  /**
+   * Every log file's contents, concatenated oldest → newest, for a full
+   * payment-history export. Returns '' if nothing has been logged yet.
+   */
+  readAllLogs() {
+    let files = [];
+    try {
+      files = fs
+        .readdirSync(this.logsDir)
+        .filter((f) => /^bridge-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+        .sort();
+    } catch {
+      return '';
+    }
+    return files
+      .map((f) => {
+        const body = fs.readFileSync(path.join(this.logsDir, f), 'utf8');
+        return `\n===== ${f} =====\n${body}`;
+      })
+      .join('');
   }
 
   getState() {
@@ -51,7 +97,7 @@ class Bridge {
     if (this.proc) await this.stop();
     this.port = Number(port) || 5000;
     this._setStatus('starting');
-    this._pushLog(`Starting PAX Bridge on port ${this.port}…`, 'sys');
+    this._pushLog(`Starting Salesgent Pax Bridge on port ${this.port}…`, 'sys');
 
     const env = {
       ...process.env,

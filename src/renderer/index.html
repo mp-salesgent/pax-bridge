@@ -4,15 +4,15 @@
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http://localhost:* http://127.0.0.1:*; img-src 'self' data:;" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PAX Bridge</title>
+    <title>Salesgent Pax Bridge</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
-        <div class="logo">P</div>
+        <div class="logo">S</div>
         <div>
-          <div class="brand-name">PAX Bridge</div>
+          <div class="brand-name">Salesgent Pax Bridge</div>
           <div class="brand-sub" id="appMeta">—</div>
         </div>
       </div>
@@ -92,11 +92,7 @@
         <div class="card span2">
           <div class="card-head"><h3>Options</h3></div>
           <div class="setting">
-            <div><b>Bridge port</b><p class="muted">The local port the bridge listens on. Restart to apply.</p></div>
-            <input id="setPort" type="number" min="1" max="65535" />
-          </div>
-          <div class="setting">
-            <div><b>Launch at login</b><p class="muted">Start PAX Bridge automatically when this computer starts.</p></div>
+            <div><b>Launch at login</b><p class="muted">Start Salesgent Pax Bridge automatically when this computer starts.</p></div>
             <label class="switch"><input id="setLogin" type="checkbox" /><span></span></label>
           </div>
           <div class="setting">
@@ -117,7 +113,17 @@
       <!-- LOGS -->
       <section class="panel" data-panel="logs">
         <div class="card span2 tall">
-          <div class="card-head"><h3>Live logs</h3><button class="btn ghost sm" id="btnClearLogs">Clear</button></div>
+          <div class="card-head">
+            <h3>Live logs</h3>
+            <div class="row gap">
+              <button class="btn ghost sm" id="btnDownloadLogs">Download logs</button>
+              <button class="btn ghost sm" id="btnClearLogs">Clear view</button>
+            </div>
+          </div>
+          <p class="muted" style="margin: -4px 0 10px; font-size: 12px;">
+            "Download logs" exports the full history (every payment, every day) as a text file.
+            "Clear view" only clears what's shown here — nothing is deleted.
+          </p>
           <pre id="logView" class="logs"></pre>
         </div>
       </section>
@@ -125,6 +131,7 @@
 
     <!-- Update toast -->
     <div class="toast" id="updateToast" hidden>
+      <button class="toast-close" id="toastClose" aria-label="Dismiss">×</button>
       <div class="toast-body">
         <b id="toastTitle">Update</b>
         <p id="toastMsg" class="muted"></p>

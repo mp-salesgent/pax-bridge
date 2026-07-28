@@ -27,6 +27,10 @@ extraResources:
 
 asar: true
 
+# Re-signs the macOS app ad-hoc after packaging. Required: without it the app
+# carries Electron's stale signature and macOS reports it as "damaged".
+afterPack: build/after-pack.js
+
 mac:
   target:
     - target: dmg

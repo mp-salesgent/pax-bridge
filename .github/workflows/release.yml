@@ -22,15 +22,48 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+
+      # Defender scans every file electron-builder writes; NSIS compressing a
+      # ~100 MB installer is thousands of small writes, which is what made the
+      # Windows job take 20+ minutes. Excluding the build dirs cuts that to a
+      # few minutes. Runners are ephemeral and isolated, so this is safe here.
+      - name: Disable Defender scanning for build dirs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\AppData\Local\electron-builder"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\AppData\Local\electron"
+          Add-MpPreference -ExclusionProcess "node.exe"
+          Add-MpPreference -ExclusionProcess "makensis.exe"
+          Add-MpPreference -ExclusionProcess "7z.exe"
+        continue-on-error: true
+
+      # electron-builder downloads the Electron runtime (~115 MB) plus its NSIS
+      # and winCodeSign helper binaries on every cold run. Caching them removes
+      # that download from subsequent builds.
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
 
       - name: Install app dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install bridge dependencies
         run: npm run bridge:install

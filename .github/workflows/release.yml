@@ -1,0 +1,41 @@
+name: Release
+
+# Builds and publishes installers for every platform on a version tag push,
+# or on demand via the Actions tab (workflow_dispatch). Each OS builds its own
+# native installer on its own runner — this avoids the wine/cross-build
+# reliability issues of building Windows from macOS.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Lets the built-in GITHUB_TOKEN create/update the Release and upload assets,
+# without needing a personal access token as a secret.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install app dependencies
+        run: npm install
+
+      - name: Install bridge dependencies
+        run: npm run bridge:install
+
+      - name: Build and publish
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

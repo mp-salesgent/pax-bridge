@@ -35,7 +35,9 @@ mac:
       arch: [arm64, x64]
   category: public.app-category.point-of-sale
   icon: build/icon.icns
-  artifactName: "PAX-Bridge-${version}-${arch}.${ext}"
+  # No ${version} in the name: GitHub's /releases/latest/download/<name> redirect
+  # needs a stable filename to always serve the newest release.
+  artifactName: "PAX-Bridge-mac-${arch}.${ext}"
   # Unsigned builds run after a right-click → Open. Add identity + notarize later.
   identity: null
 
@@ -47,7 +49,7 @@ win:
     - target: nsis
       arch: [x64]
   icon: build/icon.ico
-  artifactName: "PAX-Bridge-Setup-${version}.${ext}"
+  artifactName: "PAX-Bridge-Setup.${ext}"
 
 nsis:
   oneClick: false

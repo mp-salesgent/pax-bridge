@@ -129,9 +129,9 @@
       </section>
     </main>
 
-    <!-- Update toast -->
-    <div class="toast" id="updateToast" hidden>
-      <button class="toast-close" id="toastClose" aria-label="Dismiss">×</button>
+    <!-- Lightweight update toast (auto-dismiss for info; actions only when needed) -->
+    <div class="toast is-info" id="updateToast" role="status" aria-live="polite">
+      <button type="button" class="toast-close" id="toastClose" aria-label="Dismiss">×</button>
       <div class="toast-body">
         <b id="toastTitle">Update</b>
         <p id="toastMsg" class="muted"></p>

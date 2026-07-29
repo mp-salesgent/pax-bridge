@@ -169,53 +169,109 @@ $('btnDownloadLogs').addEventListener('click', async (e) => {
   }
 });
 
-// ---- updates --------------------------------------------------------------
+// ---- updates (lightweight toast) ------------------------------------------
 const toast = $('updateToast');
-function showToast(title, msg, actions = [], progress = false) {
+let toastTimer = null;
+let userAskedForUpdate = false;
+
+function hideToast() {
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  toast.classList.remove('is-open');
+}
+
+function showToast(title, msg, { actions = [], progress = false, kind = 'info', autoHideMs = 0 } = {}) {
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+
   $('toastTitle').textContent = title;
-  // Defensive cap: never let a raw error dump balloon the toast, even if
-  // something upstream slips a multi-line message through.
   const text = String(msg ?? '');
   $('toastMsg').textContent = text.length > 300 ? `${text.slice(0, 300)}…` : text;
   $('toastProgress').hidden = !progress;
+
+  toast.classList.remove('is-info', 'is-ok', 'is-warn', 'is-err');
+  toast.classList.add(`is-${kind}`, 'is-open');
+
   const wrap = $('toastActions');
   wrap.innerHTML = '';
   for (const a of actions) {
     const b = document.createElement('button');
+    b.type = 'button';
     b.className = `btn sm ${a.primary ? 'primary' : 'ghost'}`;
-    b.textContent = a.label; b.onclick = a.onClick;
+    b.textContent = a.label;
+    b.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      a.onClick();
+    });
     wrap.appendChild(b);
   }
-  toast.hidden = false;
-}
-const hideToast = () => { toast.hidden = true; };
-$('toastClose').addEventListener('click', hideToast);
 
-$('btnUpdate').addEventListener('click', () => pax.updates.check());
+  if (autoHideMs > 0) {
+    toastTimer = setTimeout(hideToast, autoHideMs);
+  }
+}
+
+$('toastClose').addEventListener('click', (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  hideToast();
+});
+
+$('btnUpdate').addEventListener('click', () => {
+  userAskedForUpdate = true;
+  pax.updates.check();
+});
 
 pax.updates.onEvent((e) => {
   switch (e.type) {
-    case 'checking': showToast('Checking for updates…', 'Contacting the release server.', [], false); break;
-    case 'none': showToast('You’re up to date', `Version ${e.current} is the latest.`, [{ label: 'OK', onClick: hideToast }]); break;
+    case 'checking':
+      if (!userAskedForUpdate) break; // silent background checks
+      showToast('Checking for updates…', 'Contacting the release server.', { kind: 'info' });
+      break;
+    case 'none':
+      if (!userAskedForUpdate) break; // don't nag on every launch
+      userAskedForUpdate = false;
+      showToast('You’re up to date', `Version ${e.current} is the latest.`, {
+        kind: 'ok',
+        autoHideMs: 3500,
+      });
+      break;
     case 'available':
-      showToast(`Update available — v${e.version}`, 'A new version is ready to download.', [
-        { label: 'Later', onClick: hideToast },
-        { label: 'Download', primary: true, onClick: () => pax.updates.download() },
-      ]);
+      userAskedForUpdate = false;
+      showToast(`Update available — v${e.version}`, 'A new version is ready to download.', {
+        kind: 'warn',
+        actions: [
+          { label: 'Later', onClick: hideToast },
+          { label: 'Download', primary: true, onClick: () => pax.updates.download() },
+        ],
+      });
       break;
     case 'progress':
-      showToast('Downloading update…', `${e.percent}% · ${(e.bytesPerSecond / 1e6).toFixed(1)} MB/s`, [], true);
+      showToast('Downloading update…', `${e.percent}% · ${(e.bytesPerSecond / 1e6).toFixed(1)} MB/s`, {
+        kind: 'info',
+        progress: true,
+      });
       $('toastBar').style.width = `${e.percent}%`;
       break;
     case 'downloaded':
-      showToast(`Ready to install — v${e.version}`, 'The update will apply on restart.', [
-        { label: 'Later', onClick: hideToast },
-        { label: 'Restart & install', primary: true, onClick: () => pax.updates.install() },
-      ]);
+      showToast(`Ready to install — v${e.version}`, 'The update will apply on restart.', {
+        kind: 'ok',
+        actions: [
+          { label: 'Later', onClick: hideToast },
+          { label: 'Restart & install', primary: true, onClick: () => pax.updates.install() },
+        ],
+      });
       break;
-    case 'dev': showToast('Dev mode', e.message, [{ label: 'OK', onClick: hideToast }]); break;
-    case 'error': showToast('Update error', e.message, [{ label: 'Dismiss', onClick: hideToast }]); break;
-    default: break;
+    case 'dev':
+      userAskedForUpdate = false;
+      showToast('Dev mode', e.message, { kind: 'info', autoHideMs: 4000 });
+      break;
+    case 'error':
+      if (!userAskedForUpdate && !toast.classList.contains('is-open')) break;
+      userAskedForUpdate = false;
+      showToast('Update error', e.message, { kind: 'err', autoHideMs: 6000 });
+      break;
+    default:
+      break;
   }
 });
 

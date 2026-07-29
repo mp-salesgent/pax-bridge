@@ -1,23 +1,19 @@
 name: Release
 
-# Builds and publishes installers for every platform on a version tag push,
-# or on demand via the Actions tab (workflow_dispatch). Each OS builds its own
-# native installer on its own runner — this avoids the wine/cross-build
-# reliability issues of building Windows from macOS.
+# Builds installers on each OS runner (avoids wine/cross-build flakiness).
+# Tag push (v*) → build + publish to GitHub Releases.
+# Manual run → build only by default (set publish=true to upload).
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
-      win_compression:
-        description: "Windows installer compression. store = ~4 min build / ~220 MB exe. normal = LZMA, ~95 MB exe, but this exact step once ran 44 min on a GitHub runner — use when installer size matters more than build time."
-        type: choice
-        options: [store, normal]
-        default: store
+      publish:
+        description: "Upload artifacts to GitHub Releases"
+        type: boolean
+        default: false
 
-# Lets the built-in GITHUB_TOKEN create/update the Release and upload assets,
-# without needing a personal access token as a secret.
 permissions:
   contents: write
 
@@ -26,14 +22,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-2022 pinned deliberately: windows-latest now resolves to
-        # Server 2025, where this build stalled at the NSIS/7z phase even with
-        # compression=store and Defender disabled — i.e. the image itself was
-        # the variable. The same electron-builder flow is battle-tested on 2022.
+        # windows-2022: windows-latest (2025) previously stalled at the NSIS
+        # phase even with store compression. Stick to the known-good image.
         os: [macos-latest, windows-2022]
     runs-on: ${{ matrix.os }}
-    # Both jobs should finish in ~2-4 min. If one blows past this, it's stuck,
-    # and failing fast is better than burning 45 min of runner time.
+    # mx=1 compression finishes in ~1–3 min locally; 15 min is a hard stall guard.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -43,11 +36,6 @@ jobs:
           node-version: 20
           cache: npm
 
-      # Minor I/O win, NOT the fix for the slow build — a run with
-      # "RealtimeMonitoringDisabled = True" still took 44 min, which is how the
-      # real cause (7-Zip ultra compression, see the Windows build step) was
-      # finally identified. Kept because it's cheap (~8s) and reduces write
-      # overhead. Runners are ephemeral and destroyed after the job.
       - name: Disable Defender scanning (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -66,14 +54,7 @@ jobs:
                            "$env:LOCALAPPDATA\electron", "$env:LOCALAPPDATA\electron-builder")) {
             try { Add-MpPreference -ExclusionPath $p } catch { }
           }
-          $p = Get-MpPreference
-          Write-Host "RealtimeMonitoring disabled : $($p.DisableRealtimeMonitoring)"
-          Write-Host "BehaviorMonitoring disabled : $($p.DisableBehaviorMonitoring)"
-          Write-Host "ArchiveScanning disabled    : $($p.DisableArchiveScanning)"
 
-      # electron-builder downloads the Electron runtime (~115 MB) plus its NSIS
-      # and winCodeSign helper binaries on every cold run. Caching them removes
-      # that download from subsequent builds.
       - name: Cache electron-builder downloads
         uses: actions/cache@v4
         with:
@@ -92,46 +73,53 @@ jobs:
       - name: Install bridge dependencies
         run: npm run bridge:install
 
-      # Explicit step because the Windows build below calls electron-builder
-      # directly (to override compression) and so skips `prepare:build`, which
-      # is what normally generates build/icon.ico and build/icon.icns.
       - name: Generate icons
         run: npm run icons
 
-      # macOS keeps full compression — that job already finishes in ~2 min and
-      # a smaller .dmg is worth it.
-      - name: Build and publish (macOS)
+      # Publish on version tags, or when the manual "publish" input is checked.
+      - name: Resolve publish mode
+        id: pub
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            MODE=always
+          elif [[ "${{ inputs.publish }}" == "true" ]]; then
+            MODE=always
+          else
+            MODE=never
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "publish mode → $MODE"
+
+      # macOS: default compression is fine (~2–4 min, smaller .dmg/.zip).
+      - name: Build (macOS)
         if: runner.os == 'macOS'
-        run: npx electron-builder --mac --publish always
+        run: npx electron-builder --mac --publish ${{ steps.pub.outputs.mode }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # THE fix for the 25-45 min Windows build. Confirmed from the job log:
-      #   05:17:48  executing 7za.exe a -bd -mx=9 ... nsis.7z
-      #   06:01:45  cancelled by SIGINT
-      # i.e. 44 minutes inside a single 7-Zip call. `-mx=9` is *ultra* LZMA over
-      # the ~250 MB unpacked app, and it dominates everything else in the build.
-      # "store" drops it to the fastest setting. Trade-off: a larger setup.exe.
-      # Auto-update is unaffected — blockmap deltas diff uncompressed data even
-      # better, so customers still download only what changed.
-      # shell: bash is required — PowerShell splits `-c.compression=store` into
-      # `-c` + `.compression=store`, so electron-builder tries to open a config
-      # FILE named ".compression=store" and dies with ENOENT. bash passes it as
-      # a single token and yargs parses the dot-notation override correctly.
-      # Compression comes from a dedicated config FILE (electron-builder-win-ci
-      # .yml, extends the base + compression:store). The CLI form
-      # `-c.compression=store` is silently ignored — a run with that flag still
-      # logged `7za ... -mx=9`, which is the ultra-LZMA call that stalled every
-      # Windows build past the timeout on both 2022 and 2025 runner images.
-      - name: Build and publish (Windows)
+      # Windows: ELECTRON_BUILDER_COMPRESSION_LEVEL overrides the default
+      # ultra LZMA (-mx=9) that took 25–45 min on GH runners.
+      # Level 1 → ~80 MB setup.exe in ~1–3 min (benchmarked: 233→79 MB / 3s).
+      # shell: bash required so env + args aren't mangled by PowerShell.
+      - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: |
-          if [ "${{ inputs.win_compression }}" = "normal" ]; then CONFIG=electron-builder.yml; else CONFIG=electron-builder-win-ci.yml; fi
-          echo "using config: $CONFIG"
-          npx electron-builder --win nsis --publish always --config "$CONFIG"
+        run: npx electron-builder --win nsis --publish ${{ steps.pub.outputs.mode }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Logs each spawned command (7za, makensis, app-builder) — if this
-          # step ever stalls again, the last line names the exact culprit.
-          DEBUG: electron-builder
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
+
+      - name: Upload build artifacts
+        if: steps.pub.outputs.mode == 'never'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.yml
+            release/*.blockmap
+          if-no-files-found: warn
+          retention-days: 7

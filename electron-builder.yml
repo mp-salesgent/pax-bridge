@@ -6,62 +6,66 @@ directories:
   buildResources: build
   output: release
 
-# App code that goes inside the asar. The bridge server ships separately as an
-# unpacked resource (below) because it runs as its own Node process.
+# App code inside the asar. Bridge ships separately as an unpacked resource
+# because it runs as its own Node process via utilityProcess.
 files:
   - src/**/*
   - package.json
   - "!**/*.map"
+  - "!**/{test,tests,docs,__tests__}/**"
+  - "!**/*.{md,markdown,ts,map}"
 
-# The embedded PAX bridge (Express server + its production node_modules) is
-# copied verbatim next to the app so utilityProcess can fork bridge/index.js.
-# Run `npm run bridge:install` first (dist scripts do this) to populate its deps.
+# Embedded PAX bridge (Express + production deps). Filters keep only runtime
+# files — serialport prebuilds for other OSes are stripped in afterPack.
 extraResources:
   - from: bridge
     to: bridge
     filter:
       - "**/*"
-      - "!**/*.md"
       - "!**/.env"
       - "!**/data/**"
+      - "!**/*.{md,markdown,map,ts}"
+      - "!**/test/**"
+      - "!**/tests/**"
+      - "!**/__tests__/**"
+      - "!**/docs/**"
+      - "!**/example/**"
+      - "!**/examples/**"
+      - "!**/node_modules/@serialport/bindings-cpp/{src,binding.gyp,LICENSE,README.md}"
+      - "!**/node_modules/node-addon-api/**"
+      - "!**/node_modules/**/{CHANGELOG*,HISTORY*,README*,LICENSE*,LICENCE*,.npmignore,.eslintrc*,.prettierrc*}"
 
 asar: true
 
-# Only ship the English locale. Chromium bundles ~55 locale packs (~25-30 MB);
-# a POS bridge doesn't need them. On macOS this strips the .lproj folders; on
-# Windows/Linux the after-pack hook removes the extra locales/*.pak files.
+# English only — Chromium ships ~55 locale packs (~25–30 MB).
 electronLanguages:
   - en-US
   - en
 
-# after-pack: trims unused Electron runtime files (license dump, extra
-# locales), then re-signs the macOS app ad-hoc. The signing part is required:
-# without it the app carries Electron's stale signature and macOS reports it
-# as "damaged".
+# Trims unused Electron/runtime files + wrong-OS native prebuilds, then
+# ad-hoc re-signs the macOS .app so Gatekeeper doesn't report "damaged".
 afterPack: build/after-pack.js
+
+# Default is electron-builder's "normal" (= 7z -mx=9 for NSIS), which can take
+# 25–45 min on GitHub Windows runners. CI overrides with
+# ELECTRON_BUILDER_COMPRESSION_LEVEL=1 → ~80 MB installer in ~1–2 min.
+# Local scripts set the same env so `npm run dist:win` stays fast.
 
 mac:
   target:
     - target: dmg
       arch: [arm64, x64]
-    - target: zip           # zip target is required for electron-updater on mac
+    - target: zip
       arch: [arm64, x64]
   category: public.app-category.point-of-sale
   icon: build/icon.icns
-  # Artifact filenames intentionally do NOT change with the product rename:
-  # they're stable (no ${version}) so GitHub's /releases/latest/download/<name>
-  # redirect keeps working, and the ERP's download buttons already link to
-  # these exact names (PAX-Bridge-mac-${arch}.dmg / PAX-Bridge-Setup.exe).
+  # Stable names (no ${version}) so /releases/latest/download/... links keep working.
   artifactName: "PAX-Bridge-mac-${arch}.${ext}"
-  # Unsigned builds run after a right-click → Open. Add identity + notarize later.
   identity: null
 
 dmg:
-  # ${arch} is required here: electron-builder builds the arm64 and x64 dmg
-  # in parallel, and hdiutil mounts each one as a volume named after this
-  # title. Without ${arch} both builds fight over a volume named identically
-  # ("Salesgent Pax Bridge 1.0.0"), and whichever loses gets "resource busy"
-  # trying to detach the other's mount — this is what broke the last release.
+  # ${arch} required: arm64 + x64 dmg builds run in parallel and must not share
+  # the same hdiutil volume name.
   title: "Salesgent Pax Bridge ${version} ${arch}"
 
 win:
@@ -78,15 +82,14 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Salesgent Pax Bridge
+  # Keep differential packaging (blockmap) for small auto-updates.
+  differentialPackage: true
 
 linux:
   target: [AppImage]
   category: Utility
   icon: build/icon.png
 
-# Auto-update feed. electron-updater reads releases from this GitHub repo.
-# Create the repo (or point owner/repo at an existing one) and publish with
-# `npm run release` (needs a GH_TOKEN with repo scope).
 publish:
   provider: github
   owner: mp-salesgent

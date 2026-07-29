@@ -6,28 +6,15 @@
   "author": "Salesgent",
   "license": "UNLICENSED",
   "private": true,
-  "main": "src/main/main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron .",
-    "icons": "node build/make-icons.mjs",
-    "bridge:install": "npm --prefix bridge install --omit=dev --no-audit --no-fund",
-    "prepare:build": "npm run icons && npm run bridge:install",
-    "pack": "npm run prepare:build && electron-builder --dir",
-    "dist": "npm run prepare:build && ELECTRON_BUILDER_COMPRESSION_LEVEL=1 electron-builder",
-    "dist:mac": "npm run prepare:build && electron-builder --mac",
-    "dist:win": "npm run prepare:build && ELECTRON_BUILDER_COMPRESSION_LEVEL=1 electron-builder --win",
-    "dist:all": "npm run prepare:build && ELECTRON_BUILDER_COMPRESSION_LEVEL=1 electron-builder -mwl",
-    "create:dmg": "npm run prepare:build && electron-builder --mac dmg",
-    "create:exe": "npm run prepare:build && ELECTRON_BUILDER_COMPRESSION_LEVEL=1 electron-builder --win nsis",
-    "create:all": "npm run prepare:build && ELECTRON_BUILDER_COMPRESSION_LEVEL=1 electron-builder --mac dmg --win nsis",
-    "release": "npm run prepare:build && ELECTRON_BUILDER_COMPRESSION_LEVEL=1 electron-builder --publish always"
-  },
-  "dependencies": {
-    "electron-updater": "^6.3.9"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:dmg": "tauri build --bundles dmg",
+    "build:nsis": "tauri build --bundles nsis",
+    "icons": "tauri icon build/icon.png",
+    "tauri": "tauri"
   },
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "@tauri-apps/cli": "^2"
   }
 }

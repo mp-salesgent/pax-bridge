@@ -1,0 +1,130 @@
+name: Release (Tauri)
+
+# Builds macOS DMG (arm64 + x64) and Windows NSIS via tauri-action.
+# Tag push (v*) → build + publish. Manual run → artifacts only unless publish=true.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload artifacts to GitHub Releases"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles dmg
+            rust_target: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin --bundles dmg
+            rust_target: x86_64-apple-darwin
+          - platform: windows-latest
+            args: --bundles nsis
+            rust_target: ""
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build only (no publish)
+        if: ${{ !(startsWith(github.ref, 'refs/tags/v') || inputs.publish == true) }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          args: ${{ matrix.args }}
+
+      - name: Build and publish release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish == true }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE || secrets.CSC_LINK }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD || secrets.CSC_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD || secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: .
+          tagName: ${{ github.ref_name }}
+          releaseName: "Salesgent Pax Bridge ${{ github.ref_name }}"
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}
+
+      - name: Upload artifacts
+        if: ${{ !(startsWith(github.ref, 'refs/tags/v') || inputs.publish == true) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.platform }}-${{ matrix.rust_target || 'native' }}
+          path: |
+            src-tauri/target/**/release/bundle/**/*.dmg
+            src-tauri/target/**/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: warn
+          retention-days: 7
+
+  release-notes:
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set download guide on release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          OWNER_REPO="${{ github.repository }}"
+          NOTES=$(cat <<EOF
+          ## Download the right file for your system
+
+          | File | Platform | What is it? |
+          |------|----------|-------------|
+          | [PAX-Bridge_*_x64-setup.exe](https://github.com/${OWNER_REPO}/releases/latest) | Windows | NSIS installer |
+          | [*.dmg (aarch64)](https://github.com/${OWNER_REPO}/releases/latest) | macOS Apple Silicon | DMG for M1/M2/M3/M4 |
+          | [*.dmg (x64)](https://github.com/${OWNER_REPO}/releases/latest) | macOS Intel | DMG for Intel Macs |
+
+          Pick the asset matching your OS from the Assets list below.
+          EOF
+          )
+          NOTES=$(printf '%s\n' "$NOTES" | sed 's/^          //')
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release edit "$TAG" --notes "$NOTES" && exit 0
+            fi
+            sleep 6
+          done
+          echo "::warning::Release $TAG not found"

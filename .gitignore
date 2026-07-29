@@ -17,3 +17,9 @@ bridge/data/
 .env
 .DS_Store
 *.log
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/data/
+src-tauri/.env
+target/

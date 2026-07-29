@@ -46,10 +46,9 @@ electronLanguages:
 # ad-hoc re-signs the macOS .app so Gatekeeper doesn't report "damaged".
 afterPack: build/after-pack.js
 
-# Default is electron-builder's "normal" (= 7z -mx=9 for NSIS), which can take
-# 25–45 min on GitHub Windows runners. CI overrides with
-# ELECTRON_BUILDER_COMPRESSION_LEVEL=1 → ~80 MB installer in ~1–2 min.
-# Local scripts set the same env so `npm run dist:win` stays fast.
+# Default is electron-builder's "normal" (= 7z -mx=9 for NSIS). CI builds
+# Windows on Linux and sets ELECTRON_BUILDER_COMPRESSION_LEVEL=1 → ~80 MB
+# setup.exe in ~1–2 min. Local `npm run dist:win` uses the same env.
 
 mac:
   target:
@@ -74,6 +73,9 @@ win:
       arch: [x64]
   icon: build/icon.ico
   artifactName: "PAX-Bridge-Setup.${ext}"
+  # Unsigned builds: skip Authenticode. Safe for Linux cross-compile (no wine).
+  signAndEditExecutable: true
+  verifyUpdateCodeSignature: false
 
 nsis:
   oneClick: false

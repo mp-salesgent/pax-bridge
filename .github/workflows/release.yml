@@ -1,8 +1,13 @@
 name: Release
 
-# Builds installers on each OS runner (avoids wine/cross-build flakiness).
-# Tag push (v*) → build + publish to GitHub Releases.
-# Manual run → build only by default (set publish=true to upload).
+# macOS builds on macos-latest.
+# Windows builds on ubuntu-latest (cross-compile). Unsigned Windows NSIS does
+# NOT need wine — electron-builder uses native Linux 7za + makensis. Building
+# NSIS on windows-2022 hangs for 15+ min at "building target=nsis" (Defender /
+# 7za stall); packaging itself finishes in seconds, then the archive step never
+# returns. Linux avoids that entirely.
+#
+# Tag push (v*) → build + publish. Manual run → build only unless publish=true.
 on:
   push:
     tags:
@@ -22,38 +27,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-2022: windows-latest (2025) previously stalled at the NSIS
-        # phase even with store compression. Stick to the known-good image.
-        os: [macos-latest, windows-2022]
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: win
     runs-on: ${{ matrix.os }}
-    # mx=1 compression finishes in ~1–3 min locally; 15 min is a hard stall guard.
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-
-      - name: Disable Defender scanning (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Continue'
-          foreach ($s in @(
-            @{DisableRealtimeMonitoring   = $true},
-            @{DisableBehaviorMonitoring   = $true},
-            @{DisableIOAVProtection       = $true},
-            @{DisableScanOnRealtimeEnable = $true},
-            @{DisableArchiveScanning      = $true}
-          )) {
-            try { Set-MpPreference @s } catch { Write-Host "could not set $($s.Keys): $_" }
-          }
-          foreach ($p in @($env:GITHUB_WORKSPACE, $env:TEMP, $env:RUNNER_TEMP,
-                           "$env:LOCALAPPDATA\electron", "$env:LOCALAPPDATA\electron-builder")) {
-            try { Add-MpPreference -ExclusionPath $p } catch { }
-          }
 
       - name: Cache electron-builder downloads
         uses: actions/cache@v4
@@ -61,11 +48,9 @@ jobs:
           path: |
             ~/.cache/electron
             ~/.cache/electron-builder
-            ~\AppData\Local\electron\Cache
-            ~\AppData\Local\electron-builder\Cache
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-${{ matrix.platform }}-electron-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-electron-
+            ${{ runner.os }}-${{ matrix.platform }}-electron-
 
       - name: Install app dependencies
         run: npm ci
@@ -76,7 +61,6 @@ jobs:
       - name: Generate icons
         run: npm run icons
 
-      # Publish on version tags, or when the manual "publish" input is checked.
       - name: Resolve publish mode
         id: pub
         shell: bash
@@ -91,30 +75,27 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "publish mode → $MODE"
 
-      # macOS: default compression is fine (~2–4 min, smaller .dmg/.zip).
       - name: Build (macOS)
-        if: runner.os == 'macOS'
+        if: matrix.platform == 'mac'
         run: npx electron-builder --mac --publish ${{ steps.pub.outputs.mode }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      # Windows: ELECTRON_BUILDER_COMPRESSION_LEVEL overrides the default
-      # ultra LZMA (-mx=9) that took 25–45 min on GH runners.
-      # Level 1 → ~80 MB setup.exe in ~1–3 min (benchmarked: 233→79 MB / 3s).
-      # shell: bash required so env + args aren't mangled by PowerShell.
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
+      # Cross-compile Windows NSIS on Linux. Level 1 ≈ 80 MB setup in ~1–2 min.
+      - name: Build (Windows on Linux)
+        if: matrix.platform == 'win'
         run: npx electron-builder --win nsis --publish ${{ steps.pub.outputs.mode }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
 
       - name: Upload build artifacts
         if: steps.pub.outputs.mode == 'never'
         uses: actions/upload-artifact@v4
         with:
-          name: installers-${{ runner.os }}
+          name: installers-${{ matrix.platform }}
           path: |
             release/*.dmg
             release/*.zip

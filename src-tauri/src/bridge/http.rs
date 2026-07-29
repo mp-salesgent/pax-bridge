@@ -10,9 +10,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use futures::future::BoxFuture;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -305,7 +306,7 @@ async fn batch_close_terminal(State(state): State<AppState>, Path(id): Path<Stri
 // Payments routes
 // ---------------------------------------------------------------------------
 
-type InvokeFuture = BoxFuture<'static, Result<CreditResponse, PaxError>>;
+type InvokeFuture = Pin<Box<dyn Future<Output = Result<CreditResponse, PaxError>> + Send>>;
 type Invoke = Box<dyn FnOnce(String, Option<OnState>) -> InvokeFuture + Send>;
 
 async fn require_terminal(state: &AppState, body: &Value) -> Result<Terminal, (StatusCode, Json<Value>)> {

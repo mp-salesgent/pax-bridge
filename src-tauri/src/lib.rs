@@ -4,7 +4,7 @@
 //! knows nothing about Tauri. This module owns its lifecycle: starting it on
 //! a background tokio task, stopping it via a `CancellationToken`, tracking
 //! its status/port for the UI, and wiring up the tray, single-instance lock,
-//! autostart, settings persistence and updater.
+//! autostart, settings persistence.
 
 pub mod bridge;
 
@@ -17,9 +17,6 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt as _;
-use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
@@ -65,7 +62,6 @@ impl BridgeRuntime {
 struct PaxManaged {
     runtime: Arc<BridgeRuntime>,
     is_quitting: Arc<AtomicBool>,
-    pending_update: AsyncMutex<Option<Update>>,
 }
 
 async fn push_log(app: &AppHandle, rt: &Arc<BridgeRuntime>, stream: &str, line: impl Into<String>) {
@@ -300,16 +296,32 @@ fn settings_set(app: AppHandle, patch: Value) -> Value {
     next
 }
 
+fn open_with_system(target: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(target).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd").args(["/C", "start", "", target]).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(target).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn open_user_data(app: AppHandle) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let _ = std::fs::create_dir_all(&dir);
-    app.shell().open(dir.to_string_lossy().to_string(), None).map_err(|e| e.to_string())
+    open_with_system(&dir.to_string_lossy())
 }
 
 #[tauri::command]
-async fn open_external(app: AppHandle, url: String) -> Result<(), String> {
-    app.shell().open(url, None).map_err(|e| e.to_string())
+async fn open_external(url: String) -> Result<(), String> {
+    open_with_system(&url)
 }
 
 #[tauri::command]
@@ -334,85 +346,34 @@ async fn logs_download(app: AppHandle, state: State<'_, PaxManaged>) -> Result<V
         .join("\n");
 
     let default_name = format!("salesgent-pax-bridge-logs-{}.log", chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S"));
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog().file().set_title("Save Salesgent Pax Bridge logs").set_file_name(&default_name).add_filter("Log file", &["log", "txt"]).blocking_save_file()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-
-    match picked {
-        Some(path) => {
-            let path_buf = path.into_path().map_err(|e| e.to_string())?;
-            std::fs::write(&path_buf, content).map_err(|e| e.to_string())?;
-            Ok(json!({ "ok": true, "filePath": path_buf.to_string_lossy() }))
-        }
-        None => Ok(json!({ "ok": false, "reason": "cancelled" })),
-    }
+    let dir = app.path().download_dir().or_else(|_| app.path().app_data_dir()).map_err(|e| e.to_string())?;
+    let _ = std::fs::create_dir_all(&dir);
+    let path_buf = dir.join(default_name);
+    std::fs::write(&path_buf, content).map_err(|e| e.to_string())?;
+    Ok(json!({ "ok": true, "filePath": path_buf.to_string_lossy() }))
 }
 
 #[tauri::command]
-async fn update_check(app: AppHandle, state: State<'_, PaxManaged>) -> Result<Value, String> {
-    let _ = app.emit("update:event", json!({ "type": "checking" }));
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    match updater.check().await {
-        Ok(Some(update)) => {
-            let version = update.version.clone();
-            *state.pending_update.lock().await = Some(update);
-            let _ = app.emit("update:event", json!({ "type": "available", "version": version }));
-            Ok(json!({ "available": true, "version": version }))
-        }
-        Ok(None) => {
-            let current = app.package_info().version.to_string();
-            let _ = app.emit("update:event", json!({ "type": "none", "current": current }));
-            Ok(json!({ "available": false }))
-        }
-        Err(err) => {
-            let _ = app.emit("update:event", json!({ "type": "error", "message": err.to_string() }));
-            Err(err.to_string())
-        }
-    }
+async fn update_check(app: AppHandle) -> Result<Value, String> {
+    let current = app.package_info().version.to_string();
+    let _ = app.emit("update:event", json!({ "type": "none", "current": current }));
+    Ok(json!({ "available": false, "disabled": true }))
 }
 
 #[tauri::command]
-async fn update_download(app: AppHandle, state: State<'_, PaxManaged>) -> Result<(), String> {
-    let update = state.pending_update.lock().await.take();
-    let Some(update) = update else {
-        return Err("No update available. Check for updates first.".to_string());
-    };
-
-    let app_progress = app.clone();
-    let app_finished = app.clone();
-    let result = update
-        .download_and_install(
-            move |chunk_len, content_len| {
-                let _ = app_progress.emit("update:event", json!({ "type": "progress", "chunkLength": chunk_len, "contentLength": content_len }));
-            },
-            move || {
-                let _ = app_finished.emit("update:event", json!({ "type": "downloaded" }));
-            },
-        )
-        .await;
-
-    if let Err(err) = result {
-        let _ = app.emit("update:event", json!({ "type": "error", "message": err.to_string() }));
-        return Err(err.to_string());
-    }
-    Ok(())
+async fn update_download() -> Result<(), String> {
+    Err("In-app updates are disabled in this build. Download the latest release from GitHub.".into())
 }
 
 #[tauri::command]
-fn update_install(app: AppHandle) {
-    app.restart();
-}
+fn update_install() {}
 
 // ---------------------------------------------------------------------------
 // App bootstrap
 // ---------------------------------------------------------------------------
 
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -423,10 +384,6 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             app_info,
             bridge_state,
@@ -458,7 +415,7 @@ pub fn run() {
 
             let runtime = Arc::new(BridgeRuntime::new());
             let is_quitting = Arc::new(AtomicBool::new(false));
-            app.manage(PaxManaged { runtime: runtime.clone(), is_quitting: is_quitting.clone(), pending_update: AsyncMutex::new(None) });
+            app.manage(PaxManaged { runtime: runtime.clone(), is_quitting: is_quitting.clone() });
 
             // --- Tray icon: Open / Restart bridge / Quit ---
             let open_item = MenuItem::with_id(app, "open", "Open window", true, None::<&str>)?;

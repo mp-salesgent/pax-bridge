@@ -70,10 +70,11 @@ fn to_base36(mut n: i64) -> String {
 }
 
 fn rand_base36(len: usize) -> String {
+    let bytes = uuid::Uuid::new_v4().as_bytes().to_vec();
     (0..len)
-        .map(|_| {
-            let idx = rand::random::<u32>() % 36;
-            std::char::from_digit(idx, 36).unwrap_or('0')
+        .map(|i| {
+            let idx = bytes[i % bytes.len()] % 36;
+            std::char::from_digit(u32::from(idx), 36).unwrap_or('0')
         })
         .collect()
 }
@@ -246,7 +247,7 @@ impl Db {
     // Format: <yyyymmdd><4-digit seq>, e.g. 202607100001
     // -----------------------------------------------------------------
     pub fn next_ecr_ref_num(&mut self) -> String {
-        let now = chrono::Local::now();
+        let now = chrono::Utc::now();
         let date_key = now.format("%Y%m%d").to_string();
         let next = self.data.ecr_seq.get(&date_key).copied().unwrap_or(0) + 1;
         self.data.ecr_seq.insert(date_key.clone(), next);

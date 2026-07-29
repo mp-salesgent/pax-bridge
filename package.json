@@ -1,7 +1,7 @@
 {
   "name": "pax-bridge-desktop",
   "productName": "Salesgent Pax Bridge",
-  "version": "1.0.1",
+  "version": "1.0.6",
   "description": "Installable, auto-updating desktop app that runs the Salesgent PAX payment bridge on a store computer.",
   "author": "Salesgent",
   "license": "UNLICENSED",
@@ -11,6 +11,8 @@
     "build": "tauri build",
     "build:dmg": "tauri build --bundles dmg",
     "build:nsis": "tauri build --bundles nsis",
+    "build:server": "cargo build --release --manifest-path src-tauri/Cargo.toml --features bridge-server --bin pax-bridge-server",
+    "test:api": "node scripts/test-bridge-apis.mjs",
     "icons": "tauri icon build/icon.png",
     "tauri": "tauri"
   },

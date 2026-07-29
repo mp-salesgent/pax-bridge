@@ -1,9 +1,10 @@
 [package]
 name = "pax_bridge_desktop"
-version = "1.0.1"
+version = "1.0.6"
 description = "Salesgent Pax Bridge"
 edition = "2021"
 license = "UNLICENSED"
+default-run = "pax-bridge-desktop"
 
 [lib]
 name = "pax_bridge_desktop_lib"
@@ -14,40 +15,46 @@ path = "src/lib.rs"
 name = "pax-bridge-desktop"
 path = "src/main.rs"
 
+[[bin]]
+name = "pax-bridge-server"
+path = "src/bin/pax_bridge_server.rs"
+required-features = ["bridge-server"]
+
+[features]
+default = []
+# Headless HTTP/WS binary for local API tests — not shipped in the .app bundle.
+bridge-server = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# Minimal Tauri surface — no updater/dialog/shell/process plugins (those alone add MBs).
+tauri = { version = "2", default-features = false, features = ["wry", "tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
-tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
-tauri-plugin-dialog = "2"
 
-# --- PAX bridge deps (unchanged) ---
-axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs", "io-util"] }
-tokio-util = { version = "0.7", features = ["rt"] }
-tower-http = { version = "0.6", features = ["cors"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serialport = "4"
+# --- PAX bridge ---
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "ws"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "time", "sync", "fs", "io-util", "signal"] }
+tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+tower-http = { version = "0.6", default-features = false, features = ["cors"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+serialport = { version = "4", default-features = false }
 dotenvy = "0.15"
-uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", features = ["clock"] }
+uuid = { version = "1", default-features = false, features = ["v4", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 thiserror = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-futures = "0.3"
-bytes = "1"
-anyhow = "1"
-rand = "0.8"
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
+bytes = { version = "1", default-features = false }
+anyhow = { version = "1", default-features = false }
 
 [profile.release]
 opt-level = "z"
-lto = true
+lto = "fat"
 codegen-units = 1
 panic = "abort"
-strip = true
+strip = "symbols"
+overflow-checks = false

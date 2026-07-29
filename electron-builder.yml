@@ -27,8 +27,17 @@ extraResources:
 
 asar: true
 
-# Re-signs the macOS app ad-hoc after packaging. Required: without it the app
-# carries Electron's stale signature and macOS reports it as "damaged".
+# Only ship the English locale. Chromium bundles ~55 locale packs (~25-30 MB);
+# a POS bridge doesn't need them. On macOS this strips the .lproj folders; on
+# Windows/Linux the after-pack hook removes the extra locales/*.pak files.
+electronLanguages:
+  - en-US
+  - en
+
+# after-pack: trims unused Electron runtime files (license dump, extra
+# locales), then re-signs the macOS app ad-hoc. The signing part is required:
+# without it the app carries Electron's stale signature and macOS reports it
+# as "damaged".
 afterPack: build/after-pack.js
 
 mac:

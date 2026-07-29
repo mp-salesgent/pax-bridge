@@ -21,9 +21,47 @@
  * unsigned build actually runnable.
  */
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 
+/**
+ * Trim runtime files Electron ships that this app never uses. Most of the
+ * package is Chromium itself (~200 MB, non-negotiable), but the license dump
+ * and non-English locale packs are dead weight for a POS bridge:
+ *   - LICENSES.chromium.html  (~9 MB)
+ *   - locales/*.pak except en-US (Windows/Linux; macOS handled by
+ *     electronLanguages in electron-builder.yml)
+ */
+function trimRuntime(context) {
+  const dir = context.appOutDir;
+  let saved = 0;
+
+  const rm = (p) => {
+    try {
+      const st = fs.statSync(p);
+      fs.rmSync(p, { recursive: true, force: true });
+      saved += st.size || 0;
+    } catch {
+      /* absent on this platform — fine */
+    }
+  };
+
+  rm(path.join(dir, 'LICENSES.chromium.html'));
+  rm(path.join(dir, 'LICENSE.electron.txt'));
+  rm(path.join(dir, 'version'));
+
+  const locales = path.join(dir, 'locales');
+  if (fs.existsSync(locales)) {
+    for (const f of fs.readdirSync(locales)) {
+      if (f !== 'en-US.pak') rm(path.join(locales, f));
+    }
+  }
+  if (saved > 0) console.log(`  • trimmed unused runtime files  saved=${(saved / 1e6).toFixed(1)}MB`);
+}
+
 exports.default = async function afterPack(context) {
+  trimRuntime(context);
+
   if (context.electronPlatformName !== 'darwin') return;
 
   const appName = `${context.packager.appInfo.productFilename}.app`;

@@ -9,6 +9,12 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      win_compression:
+        description: "Windows installer compression. store = ~4 min build / ~220 MB exe. normal = LZMA, ~95 MB exe, but this exact step once ran 44 min on a GitHub runner — use when installer size matters more than build time."
+        type: choice
+        options: [store, normal]
+        default: store
 
 # Lets the built-in GITHUB_TOKEN create/update the Release and upload assets,
 # without needing a personal access token as a secret.
@@ -111,6 +117,6 @@ jobs:
       - name: Build and publish (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: npx electron-builder --win nsis --publish always -c.compression=store
+        run: npx electron-builder --win nsis --publish always -c.compression=${{ inputs.win_compression || 'store' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

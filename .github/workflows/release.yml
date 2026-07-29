@@ -26,7 +26,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        # windows-2022 pinned deliberately: windows-latest now resolves to
+        # Server 2025, where this build stalled at the NSIS/7z phase even with
+        # compression=store and Defender disabled — i.e. the image itself was
+        # the variable. The same electron-builder flow is battle-tested on 2022.
+        os: [macos-latest, windows-2022]
     runs-on: ${{ matrix.os }}
     # Both jobs should finish in ~2-4 min. If one blows past this, it's stuck,
     # and failing fast is better than burning 45 min of runner time.
@@ -120,3 +124,6 @@ jobs:
         run: npx electron-builder --win nsis --publish always -c.compression=${{ inputs.win_compression || 'store' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Logs each spawned command (7za, makensis, app-builder) — if this
+          # step ever stalls again, the last line names the exact culprit.
+          DEBUG: electron-builder

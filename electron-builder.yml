@@ -47,8 +47,9 @@ electronLanguages:
 afterPack: build/after-pack.js
 
 # Default is electron-builder's "normal" (= 7z -mx=9 for NSIS). CI builds
-# Windows on Linux and sets ELECTRON_BUILDER_COMPRESSION_LEVEL=1 → ~80 MB
-# setup.exe in ~1–2 min. Local `npm run dist:win` uses the same env.
+# Windows on macOS (avoids Windows-runner 7za hang + Linux wine) and sets
+# ELECTRON_BUILDER_COMPRESSION_LEVEL=1 → ~80 MB setup.exe. Local scripts
+# use the same env.
 
 mac:
   target:

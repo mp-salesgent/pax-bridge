@@ -1,11 +1,12 @@
 name: Release
 
-# macOS builds on macos-latest.
-# Windows builds on ubuntu-latest (cross-compile). Unsigned Windows NSIS does
-# NOT need wine — electron-builder uses native Linux 7za + makensis. Building
-# NSIS on windows-2022 hangs for 15+ min at "building target=nsis" (Defender /
-# 7za stall); packaging itself finishes in seconds, then the archive step never
-# returns. Linux avoids that entirely.
+# macOS app  → macos-latest
+# Windows NSIS → also macos-latest (NOT windows-*/ubuntu)
+#
+# Why: windows-2022 hangs 15+ min at "building target=nsis" (Defender/7za).
+# Ubuntu needs wine for NSIS uninstaller generation. macOS 10.15+ uses
+# electron-builder's UninstallerReader instead of wine, so unsigned Windows
+# NSIS builds complete there without wine or the Windows-runner stall.
 #
 # Tag push (v*) → build + publish. Manual run → build only unless publish=true.
 on:
@@ -28,12 +29,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            platform: mac
-          - os: ubuntu-latest
-            platform: win
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+          - platform: mac
+            args: --mac
+          - platform: win
+            args: --win nsis --x64
+    runs-on: macos-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -46,11 +47,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
             ~/.cache/electron
             ~/.cache/electron-builder
-          key: ${{ runner.os }}-${{ matrix.platform }}-electron-${{ hashFiles('package-lock.json') }}
+          key: mac-${{ matrix.platform }}-electron-${{ hashFiles('package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.platform }}-electron-
+            mac-${{ matrix.platform }}-electron-
 
       - name: Install app dependencies
         run: npm ci
@@ -75,20 +78,12 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "publish mode → $MODE"
 
-      - name: Build (macOS)
-        if: matrix.platform == 'mac'
-        run: npx electron-builder --mac --publish ${{ steps.pub.outputs.mode }}
+      - name: Build ${{ matrix.platform }}
+        run: npx electron-builder ${{ matrix.args }} --publish ${{ steps.pub.outputs.mode }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-
-      # Cross-compile Windows NSIS on Linux. Level 1 ≈ 80 MB setup in ~1–2 min.
-      - name: Build (Windows on Linux)
-        if: matrix.platform == 'win'
-        run: npx electron-builder --win nsis --publish ${{ steps.pub.outputs.mode }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Windows-only: fast compression (~80 MB setup). Harmless on mac.
           ELECTRON_BUILDER_COMPRESSION_LEVEL: "1"
 
       - name: Upload build artifacts

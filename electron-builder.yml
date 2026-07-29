@@ -42,8 +42,8 @@ electronLanguages:
   - en-US
   - en
 
-# Trims unused Electron/runtime files + wrong-OS native prebuilds, then
-# ad-hoc re-signs the macOS .app so Gatekeeper doesn't report "damaged".
+# Trims unused Electron/runtime files + wrong-OS native prebuilds.
+# Ad-hoc re-sign only when no Developer ID cert is present; CI uses CSC_LINK.
 afterPack: build/after-pack.js
 
 # Default is electron-builder's "normal" (= 7z -mx=9 for NSIS). CI builds
@@ -61,7 +61,13 @@ mac:
   icon: build/icon.icns
   # Stable names (no ${version}) so /releases/latest/download/... links keep working.
   artifactName: "PAX-Bridge-mac-${arch}.${ext}"
-  identity: null
+  # Developer ID signing + notarization (CI provides CSC_* + APPLE_* secrets).
+  # Without secrets, electron-builder skips signing; afterPack ad-hoc signs instead.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  notarize: true
 
 dmg:
   # ${arch} required: arm64 + x64 dmg builds run in parallel and must not share

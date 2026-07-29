@@ -1,12 +1,14 @@
 /**
- * Post-pack cleanup + macOS ad-hoc re-sign.
+ * Post-pack cleanup + macOS ad-hoc re-sign (dev / unsigned builds only).
  *
  * 1) Trim Electron runtime dead weight (licenses, extra locales, Vulkan
  *    software rasterizer this POS bridge never uses).
  * 2) Drop serialport prebuilds for other OSes (Android/Linux/wrong Windows
  *    arch) so they aren't shipped inside every installer.
- * 3) On macOS, re-sign the .app ad-hoc so Gatekeeper doesn't report it as
- *    "damaged" after electron-builder rewrote the Electron stub.
+ * 3) On macOS without a Developer ID cert, re-sign ad-hoc so Gatekeeper
+ *    doesn't report the app as "damaged". When CSC_LINK / CSC_NAME is set,
+ *    electron-builder signs with Developer ID after this hook — skip ad-hoc
+ *    so we don't overwrite the real signing pipeline.
  */
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -126,6 +128,10 @@ function trimRuntime(context, stats) {
   }
 }
 
+function hasDeveloperIdCert() {
+  return Boolean(process.env.CSC_LINK || process.env.CSC_NAME);
+}
+
 function adHocSignMac(context) {
   const appName = `${context.packager.appInfo.productFilename}.app`;
   const appPath = path.join(context.appOutDir, appName);
@@ -159,7 +165,12 @@ exports.default = async function afterPack(context) {
     );
   }
 
-  if (context.electronPlatformName === 'darwin') {
-    adHocSignMac(context);
+  if (context.electronPlatformName !== 'darwin') return;
+
+  if (hasDeveloperIdCert()) {
+    console.log('  • skipping ad-hoc sign (Developer ID cert present — electron-builder will sign)');
+    return;
   }
+
+  adHocSignMac(context);
 };

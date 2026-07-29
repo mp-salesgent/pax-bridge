@@ -8,9 +8,10 @@ auto-updating releases to customers.
 - [3. Build the Windows installer (.exe)](#3-build-the-windows-installer-exe)
 - [4. Ship auto-updates (GitHub Releases)](#4-ship-auto-updates-github-releases)
 - [5. Release with CI (mac + Windows together)](#5-release-with-ci-mac--windows-together)
-- [6. What the customer does](#6-what-the-customer-does)
-- [7. Versioning & how updates reach customers](#7-versioning--how-updates-reach-customers)
-- [8. Troubleshooting](#8-troubleshooting)
+- [6. macOS signing & notarization (required for clients)](#6-macos-signing--notarization-required-for-clients)
+- [7. What the customer does](#7-what-the-customer-does)
+- [8. Versioning & how updates reach customers](#8-versioning--how-updates-reach-customers)
+- [9. Troubleshooting](#9-troubleshooting)
 
 ---
 
@@ -64,8 +65,8 @@ release/
 ```
 
 > First run downloads the Electron runtime (~100 MB per arch), then it's cached.
-> You'll see `skipped macOS code signing` — expected for unsigned builds
-> (see [§8](#8-troubleshooting) to sign/notarize).
+> Without Apple signing secrets this is an unsigned local build (Gatekeeper will
+> block clients). For customer-facing builds use CI with secrets — see [§6](#6-macos-signing--notarization-required-for-clients).
 
 **Just one architecture (faster):**
 
@@ -146,7 +147,8 @@ you're ready for customers to receive it.
 ## 5. Release with CI (mac + Windows together)
 
 Already set up — [`.github/workflows/release.yml`](.github/workflows/release.yml)
-builds mac + Windows on their own native runners (no wine) and publishes both
+builds mac + Windows on `macos-latest` (Windows NSIS is cross-built there) and
+publishes both to one GitHub Release.
 to the same GitHub Release, triggered by pushing a `v*` tag or manually from
 the Actions tab (`workflow_dispatch`):
 
@@ -190,26 +192,93 @@ git tag v1.0.1
 git push origin main --tags
 ```
 
-Each runner builds its native installer (`.dmg` on macOS, `.exe` on Windows) and
-uploads to the same GitHub Release.
+Each runner builds its installer and uploads to the same GitHub Release.
+macOS builds **must** have signing + notarization secrets (see §6) or the
+publish job fails — by design, so clients never get a Gatekeeper-blocked app.
 
 ---
 
-## 6. What the customer does
+## 6. macOS signing & notarization (required for clients)
+
+Without this, macOS shows **"Apple could not verify … is free of malware"** and
+the only workaround is a right-click → Open on each client PC. That is not
+acceptable for production.
+
+You need an **Apple Developer Program** membership ($99/year).
+
+### a) Create a Developer ID Application certificate
+
+1. On a Mac, open **Keychain Access** → Certificate Assistant → Request a Certificate From a Certificate Authority (save to disk).
+2. In [developer.apple.com/account/resources/certificates](https://developer.apple.com/account/resources/certificates/list) create **Developer ID Application** and upload the CSR.
+3. Download the `.cer`, double-click to install into Keychain.
+4. Export it as a `.p12` (include private key), set a strong password.
+
+Encode for GitHub:
+
+```bash
+base64 -i "Developer ID Application.p12" | pbcopy
+```
+
+### b) Create notarization credentials (pick one)
+
+**Option A — App Store Connect API key (recommended)**
+
+1. [App Store Connect → Users and Access → Integrations → Team Keys](https://appstoreconnect.apple.com/access/integrations/api)
+2. Create a key with **Developer** access, download `AuthKey_XXXXXX.p8` (once only).
+3. Note **Key ID** and **Issuer ID** (UUID).
+
+Store the `.p8` contents (or base64 of the file) as the `APPLE_API_KEY` secret.
+
+**Option B — Apple ID + app-specific password**
+
+1. Apple ID → Sign-In and Security → App-Specific Passwords → generate one.
+2. Find your **Team ID** at [developer.apple.com/account](https://developer.apple.com/account) (Membership details).
+
+### c) Add GitHub repo secrets
+
+Repo → **Settings → Secrets and variables → Actions** → add:
+
+| Secret | Value |
+|--------|--------|
+| `CSC_LINK` | base64 of the `.p12` (Developer ID Application) |
+| `CSC_KEY_PASSWORD` | password used when exporting the `.p12` |
+| **Either API key** | |
+| `APPLE_API_KEY` | raw `.p8` PEM text **or** base64 of the file |
+| `APPLE_API_KEY_ID` | Key ID (e.g. `AB12CD34EF`) |
+| `APPLE_API_ISSUER` | Issuer UUID |
+| **Or Apple ID** | |
+| `APPLE_ID` | your Apple ID email |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password |
+| `APPLE_TEAM_ID` | 10-character Team ID |
+
+Tag releases (`v*`) then fail the mac job if these are missing — so an
+unsigned build cannot ship by accident.
+
+### d) What CI does with them
+
+1. Imports `CSC_LINK` → signs the `.app` with **Developer ID** + hardened runtime.
+2. Submits to Apple **notarytool** and staples the ticket.
+3. Packages signed/notarized `.dmg` / `.zip`.
+
+Clients open the app with a normal double-click — no Gatekeeper block.
+
+---
+
+## 7. What the customer does
 
 **macOS** — download the `.dmg` for their chip → open it → drag **Salesgent Pax Bridge**
-to Applications → first launch: right-click the app → **Open** (unsigned app).
+to Applications → **double-click to open** (signed + notarized builds).
 
-**Windows** — download `PAX-Bridge-Setup-<ver>.exe` → run it → on the SmartScreen
-prompt click **More info → Run anyway** → finish the wizard → launch from the
-Start Menu / desktop.
+**Windows** — download `PAX-Bridge-Setup.exe` → run it → if SmartScreen appears
+click **More info → Run anyway** (Windows code signing is separate; see §9) →
+finish the wizard → launch from the Start Menu / desktop.
 
 The app keeps running in the menu bar / system tray. In **Settings** they can
 turn on *Launch at login* and *Start bridge on launch* so it's always ready.
 
 ---
 
-## 7. Versioning & how updates reach customers
+## 8. Versioning & how updates reach customers
 
 - The single source of truth is **`version`** in `package.json`.
 - Update semver every release: patch (`1.0.1`) for fixes, minor (`1.1.0`) for
@@ -224,13 +293,15 @@ turn on *Launch at login* and *Start bridge on launch* so it's always ready.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `skipped macOS code signing` | Expected for unsigned builds. To remove the right-click-to-open step, set `mac.identity` to your Apple Developer ID in `electron-builder.yml` and add notarization (`afterSign` + `@electron/notarize`). |
-| Windows "Windows protected your PC" (SmartScreen) | Expected for unsigned `.exe`. Buy an EV/OV code-signing cert and set `win.certificateFile` / `certificatePassword` (or use Azure Trusted Signing). |
-| `dist:win` fails on macOS | Install `wine`, or build on Windows / CI ([§3](#3-build-the-windows-installer-exe), [§5](#5-release-with-ci-mac--windows-together)). |
+| Gatekeeper: "Apple could not verify…" | Build was not signed/notarized. Add §6 secrets and cut a new tag release. |
+| CI: `Missing secret CSC_LINK` | Export Developer ID `.p12`, base64 it, add as `CSC_LINK` (+ `CSC_KEY_PASSWORD`). |
+| CI: notarization / notarytool errors | Check API key or Apple ID secrets; Team ID must match the signing cert's team. |
+| Windows "Windows protected your PC" (SmartScreen) | Expected for unsigned `.exe`. Buy an EV/OV code-signing cert and configure `win` signing (separate from macOS). |
+| `dist:win` fails on macOS | Use CI ([§5](#5-release-with-ci-mac--windows-together)) — Windows NSIS is built on macOS runners there. |
 | `ENOENT app-update.yml` in logs | Only happens with `npm run pack` (`--dir`). Real `dist:*` builds generate it — ignore for unpacked smoke tests. |
 | USB terminal not detected in the packaged app | `electron-builder` rebuilds `serialport` for you; if USB still fails, run `npx @electron/rebuild -m bridge` before `dist`. LAN/TCP always works and is the default. |
 | "Port already in use" on launch | Another bridge is on that port. Change the port in **Settings** (restarts the bridge automatically). |

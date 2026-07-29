@@ -118,10 +118,18 @@ jobs:
       # `-c` + `.compression=store`, so electron-builder tries to open a config
       # FILE named ".compression=store" and dies with ENOENT. bash passes it as
       # a single token and yargs parses the dot-notation override correctly.
+      # Compression comes from a dedicated config FILE (electron-builder-win-ci
+      # .yml, extends the base + compression:store). The CLI form
+      # `-c.compression=store` is silently ignored — a run with that flag still
+      # logged `7za ... -mx=9`, which is the ultra-LZMA call that stalled every
+      # Windows build past the timeout on both 2022 and 2025 runner images.
       - name: Build and publish (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: npx electron-builder --win nsis --publish always -c.compression=${{ inputs.win_compression || 'store' }}
+        run: |
+          if [ "${{ inputs.win_compression }}" = "normal" ]; then CONFIG=electron-builder.yml; else CONFIG=electron-builder-win-ci.yml; fi
+          echo "using config: $CONFIG"
+          npx electron-builder --win nsis --publish always --config "$CONFIG"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Logs each spawned command (7za, makensis, app-builder) — if this

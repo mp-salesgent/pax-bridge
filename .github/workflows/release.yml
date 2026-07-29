@@ -22,7 +22,9 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Both jobs should finish in ~2-4 min. If one blows past this, it's stuck,
+    # and failing fast is better than burning 45 min of runner time.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -31,27 +33,33 @@ jobs:
           node-version: 20
           cache: npm
 
-      # Defender scans every file electron-builder writes, and NSIS/7z compress
-      # the ~200 MB app as thousands of small writes — this made the Windows job
-      # hang for 25+ min at the NSIS step. Turning real-time monitoring off
-      # outright is the reliable fix: earlier attempts only excluded the
-      # workspace, but electron-builder stages the NSIS build in the *system
-      # temp dir*, so the slow path was never actually excluded.
-      # Runners are ephemeral, isolated and destroyed after the job.
-      - name: Disable Defender real-time scanning (Windows)
+      # Minor I/O win, NOT the fix for the slow build — a run with
+      # "RealtimeMonitoringDisabled = True" still took 44 min, which is how the
+      # real cause (7-Zip ultra compression, see the Windows build step) was
+      # finally identified. Kept because it's cheap (~8s) and reduces write
+      # overhead. Runners are ephemeral and destroyed after the job.
+      - name: Disable Defender scanning (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true
-          Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-          Add-MpPreference -ExclusionPath $env:TEMP
-          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
-          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder"
-          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron"
-          # Report the result so a silent failure can't hide again.
+          $ErrorActionPreference = 'Continue'
+          foreach ($s in @(
+            @{DisableRealtimeMonitoring   = $true},
+            @{DisableBehaviorMonitoring   = $true},
+            @{DisableIOAVProtection       = $true},
+            @{DisableScanOnRealtimeEnable = $true},
+            @{DisableArchiveScanning      = $true}
+          )) {
+            try { Set-MpPreference @s } catch { Write-Host "could not set $($s.Keys): $_" }
+          }
+          foreach ($p in @($env:GITHUB_WORKSPACE, $env:TEMP, $env:RUNNER_TEMP,
+                           "$env:LOCALAPPDATA\electron", "$env:LOCALAPPDATA\electron-builder")) {
+            try { Add-MpPreference -ExclusionPath $p } catch { }
+          }
           $p = Get-MpPreference
-          Write-Host "RealtimeMonitoringDisabled = $($p.DisableRealtimeMonitoring)"
-          Write-Host "ExclusionPath = $($p.ExclusionPath -join ', ')"
+          Write-Host "RealtimeMonitoring disabled : $($p.DisableRealtimeMonitoring)"
+          Write-Host "BehaviorMonitoring disabled : $($p.DisableBehaviorMonitoring)"
+          Write-Host "ArchiveScanning disabled    : $($p.DisableArchiveScanning)"
 
       # electron-builder downloads the Electron runtime (~115 MB) plus its NSIS
       # and winCodeSign helper binaries on every cold run. Caching them removes
@@ -74,10 +82,30 @@ jobs:
       - name: Install bridge dependencies
         run: npm run bridge:install
 
-      - name: Build and publish
-        run: npm run release
+      # Explicit step because the Windows build below calls electron-builder
+      # directly (to override compression) and so skips `prepare:build`, which
+      # is what normally generates build/icon.ico and build/icon.icns.
+      - name: Generate icons
+        run: npm run icons
+
+      # macOS keeps full compression — that job already finishes in ~2 min and
+      # a smaller .dmg is worth it.
+      - name: Build and publish (macOS)
+        if: runner.os == 'macOS'
+        run: npx electron-builder --mac --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Verbose logging on Windows only: if the NSIS step stalls again this
-          # shows the exact command it's sitting on instead of a silent gap.
-          DEBUG: ${{ runner.os == 'Windows' && 'electron-builder' || '' }}
+
+      # THE fix for the 25-45 min Windows build. Confirmed from the job log:
+      #   05:17:48  executing 7za.exe a -bd -mx=9 ... nsis.7z
+      #   06:01:45  cancelled by SIGINT
+      # i.e. 44 minutes inside a single 7-Zip call. `-mx=9` is *ultra* LZMA over
+      # the ~250 MB unpacked app, and it dominates everything else in the build.
+      # "store" drops it to the fastest setting. Trade-off: a larger setup.exe.
+      # Auto-update is unaffected — blockmap deltas diff uncompressed data even
+      # better, so customers still download only what changed.
+      - name: Build and publish (Windows)
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win nsis --publish always -c.compression=store
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

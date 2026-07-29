@@ -73,8 +73,10 @@ win:
       arch: [x64]
   icon: build/icon.ico
   artifactName: "PAX-Bridge-Setup.${ext}"
-  # Unsigned builds: skip Authenticode. Safe for Linux cross-compile (no wine).
-  signAndEditExecutable: true
+  # Must be false for Linux cross-compile: "sign" still pulls winCodeSign + wine
+  # even when CSC_IDENTITY_AUTO_DISCOVERY=false. asar integrity is already
+  # patched earlier via pure-JS resedit (see pack log).
+  signAndEditExecutable: false
   verifyUpdateCodeSignature: false
 
 nsis:

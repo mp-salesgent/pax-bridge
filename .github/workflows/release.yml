@@ -22,7 +22,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -31,21 +31,27 @@ jobs:
           node-version: 20
           cache: npm
 
-      # Defender scans every file electron-builder writes; NSIS compressing a
-      # ~100 MB installer is thousands of small writes, which is what made the
-      # Windows job take 20+ minutes. Excluding the build dirs cuts that to a
-      # few minutes. Runners are ephemeral and isolated, so this is safe here.
-      - name: Disable Defender scanning for build dirs (Windows)
+      # Defender scans every file electron-builder writes, and NSIS/7z compress
+      # the ~200 MB app as thousands of small writes — this made the Windows job
+      # hang for 25+ min at the NSIS step. Turning real-time monitoring off
+      # outright is the reliable fix: earlier attempts only excluded the
+      # workspace, but electron-builder stages the NSIS build in the *system
+      # temp dir*, so the slow path was never actually excluded.
+      # Runners are ephemeral, isolated and destroyed after the job.
+      - name: Disable Defender real-time scanning (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true
           Add-MpPreference -ExclusionPath "${{ github.workspace }}"
-          Add-MpPreference -ExclusionPath "$env:USERPROFILE\AppData\Local\electron-builder"
-          Add-MpPreference -ExclusionPath "$env:USERPROFILE\AppData\Local\electron"
-          Add-MpPreference -ExclusionProcess "node.exe"
-          Add-MpPreference -ExclusionProcess "makensis.exe"
-          Add-MpPreference -ExclusionProcess "7z.exe"
-        continue-on-error: true
+          Add-MpPreference -ExclusionPath $env:TEMP
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron"
+          # Report the result so a silent failure can't hide again.
+          $p = Get-MpPreference
+          Write-Host "RealtimeMonitoringDisabled = $($p.DisableRealtimeMonitoring)"
+          Write-Host "ExclusionPath = $($p.ExclusionPath -join ', ')"
 
       # electron-builder downloads the Electron runtime (~115 MB) plus its NSIS
       # and winCodeSign helper binaries on every cold run. Caching them removes
@@ -72,3 +78,6 @@ jobs:
         run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Verbose logging on Windows only: if the NSIS step stalls again this
+          # shows the exact command it's sitting on instead of a silent gap.
+          DEBUG: ${{ runner.os == 'Windows' && 'electron-builder' || '' }}

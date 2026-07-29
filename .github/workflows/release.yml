@@ -104,8 +104,13 @@ jobs:
       # "store" drops it to the fastest setting. Trade-off: a larger setup.exe.
       # Auto-update is unaffected — blockmap deltas diff uncompressed data even
       # better, so customers still download only what changed.
+      # shell: bash is required — PowerShell splits `-c.compression=store` into
+      # `-c` + `.compression=store`, so electron-builder tries to open a config
+      # FILE named ".compression=store" and dies with ENOENT. bash passes it as
+      # a single token and yargs parses the dot-notation override correctly.
       - name: Build and publish (Windows)
         if: runner.os == 'Windows'
+        shell: bash
         run: npx electron-builder --win nsis --publish always -c.compression=store
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

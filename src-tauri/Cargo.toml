@@ -1,6 +1,6 @@
 [package]
 name = "pax_bridge_desktop"
-version = "1.0.3"
+version = "1.0.4"
 description = "Salesgent Pax Bridge"
 edition = "2021"
 license = "UNLICENSED"
@@ -29,10 +29,12 @@ bridge-server = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# Minimal Tauri surface — no updater/dialog/shell/process plugins (those alone add MBs).
+# Minimal Tauri surface — no dialog/shell/process plugins (those alone add MBs).
 tauri = { version = "2", default-features = false, features = ["wry", "tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
+# In-app updates. rustls (not native-tls) keeps the size cost down.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 
 # --- PAX bridge ---
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "ws"] }

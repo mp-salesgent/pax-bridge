@@ -12,11 +12,12 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt as _;
+use tauri_plugin_updater::UpdaterExt as _;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
@@ -381,20 +382,123 @@ async fn logs_download(app: AppHandle, state: State<'_, PaxManaged>) -> Result<V
     Ok(json!({ "ok": true, "filePath": path_buf.to_string_lossy() }))
 }
 
+/// The update found by `update_check`, held so `update_download` /
+/// `update_install` act on the same one the user was shown.
+#[derive(Default)]
+struct UpdaterState {
+    pending: AsyncMutex<Option<tauri_plugin_updater::Update>>,
+    downloaded: AsyncMutex<Option<Vec<u8>>>,
+}
+
 #[tauri::command]
 async fn update_check(app: AppHandle) -> Result<Value, String> {
     let current = app.package_info().version.to_string();
-    let _ = app.emit("update:event", json!({ "type": "none", "current": current }));
-    Ok(json!({ "available": false, "disabled": true }))
+    let _ = app.emit("update:event", json!({ "type": "checking", "current": current }));
+
+    let updater = app.updater().map_err(|e| {
+        let msg = e.to_string();
+        let _ = app.emit("update:event", json!({ "type": "error", "message": msg.clone() }));
+        msg
+    })?;
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            *app.state::<UpdaterState>().pending.lock().await = Some(update);
+            let _ = app.emit(
+                "update:event",
+                json!({ "type": "available", "version": version, "current": current }),
+            );
+            Ok(json!({ "available": true, "version": version }))
+        }
+        Ok(None) => {
+            let _ = app.emit("update:event", json!({ "type": "none", "current": current }));
+            Ok(json!({ "available": false }))
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            tracing::warn!("[updater] check failed: {msg}");
+            let _ = app.emit("update:event", json!({ "type": "error", "message": msg.clone() }));
+            Err(msg)
+        }
+    }
 }
 
 #[tauri::command]
-async fn update_download() -> Result<(), String> {
-    Err("In-app updates are disabled in this build. Download the latest release from GitHub.".into())
+async fn update_download(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<UpdaterState>();
+    let pending = state.pending.lock().await;
+    let update = pending.as_ref().ok_or("No update available — check for updates first.")?;
+
+    let started = Instant::now();
+    let received = AtomicU64::new(0);
+    let app_for_chunk = app.clone();
+
+    let bytes = update
+        .download(
+            move |chunk_len, content_length| {
+                let total = received.fetch_add(chunk_len as u64, Ordering::SeqCst) + chunk_len as u64;
+                let percent = content_length
+                    .filter(|len| *len > 0)
+                    .map(|len| ((total as f64 / len as f64) * 100.0).min(100.0).round() as u64)
+                    .unwrap_or(0);
+                let secs = started.elapsed().as_secs_f64();
+                let bps = if secs > 0.0 { total as f64 / secs } else { 0.0 };
+                let _ = app_for_chunk.emit(
+                    "update:event",
+                    json!({ "type": "progress", "percent": percent, "bytesPerSecond": bps }),
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            tracing::error!("[updater] download failed: {msg}");
+            let _ = app.emit("update:event", json!({ "type": "error", "message": msg.clone() }));
+            msg
+        })?;
+
+    let version = update.version.clone();
+    *state.downloaded.lock().await = Some(bytes);
+    tracing::info!("[updater] downloaded v{version}, awaiting install");
+    let _ = app.emit("update:event", json!({ "type": "downloaded", "version": version }));
+    Ok(())
 }
 
 #[tauri::command]
-fn update_install() {}
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<UpdaterState>();
+    let bytes = state
+        .downloaded
+        .lock()
+        .await
+        .take()
+        .ok_or("No update downloaded — download it first.")?;
+
+    {
+        let pending = state.pending.lock().await;
+        let update = pending.as_ref().ok_or("No update available — check for updates first.")?;
+        update.install(bytes).map_err(|e| {
+            let msg = e.to_string();
+            tracing::error!("[updater] install failed: {msg}");
+            let _ = app.emit("update:event", json!({ "type": "error", "message": msg.clone() }));
+            msg
+        })?;
+    }
+
+    // The bridge is a local server; stop it cleanly so the relaunched instance
+    // can bind the same port instead of hitting EADDRINUSE.
+    let (runtime, is_quitting) = {
+        let managed = app.state::<PaxManaged>();
+        (managed.runtime.clone(), managed.is_quitting.clone())
+    };
+    is_quitting.store(true, Ordering::SeqCst);
+    stop_bridge_internal(app.clone(), runtime).await;
+
+    tracing::info!("[updater] installed, restarting");
+    app.restart();
+}
 
 // ---------------------------------------------------------------------------
 // App bootstrap
@@ -412,6 +516,8 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(UpdaterState::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
             bridge_state,

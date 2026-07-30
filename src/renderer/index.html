@@ -167,6 +167,20 @@
               <div><b>Automatic updates</b><p class="muted">Check for new versions and notify you.</p></div>
               <label class="switch"><input id="setAutoUpdate" type="checkbox" /><span></span></label>
             </div>
+            <div class="setting">
+              <div>
+                <b>Bridge port</b>
+                <p class="muted">The local port the bridge listens on. Change this only if another
+                  app already uses <code>5000</code> on this computer. Takes effect after a restart.</p>
+              </div>
+              <div class="port-control">
+                <form id="portForm" class="row gap">
+                  <input id="setPort" class="port-input" type="number" min="1024" max="65535" step="1" required />
+                  <button class="btn sm" type="submit">Save</button>
+                </form>
+                <p class="form-msg" id="portMsg"></p>
+              </div>
+            </div>
           </div>
         </section>
 

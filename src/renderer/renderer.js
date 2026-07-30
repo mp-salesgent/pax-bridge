@@ -143,12 +143,30 @@ async function loadSettings() {
   $('setAutostart').checked = s.startBridgeOnLaunch;
   $('setTray').checked = s.minimizeToTray;
   $('setAutoUpdate').checked = s.autoUpdate;
+  $('setPort').value = s.port ?? state.port;
 }
 const bindToggle = (id, key) => $(id).addEventListener('change', (e) => pax.settings.set({ [key]: e.target.checked }));
 bindToggle('setLogin', 'launchAtLogin');
 bindToggle('setAutostart', 'startBridgeOnLaunch');
 bindToggle('setTray', 'minimizeToTray');
 bindToggle('setAutoUpdate', 'autoUpdate');
+
+$('portForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = $('portMsg');
+  const port = Number($('setPort').value);
+  msg.textContent = ''; msg.className = 'form-msg';
+  try {
+    await pax.settings.set({ port });
+    msg.textContent = state.status === 'stopped'
+      ? 'Saved. It will be used next time you start the bridge.'
+      : 'Saved. Restart the bridge to switch to this port.';
+    msg.className = 'form-msg ok';
+  } catch (err) {
+    msg.textContent = err.message || String(err);
+    msg.className = 'form-msg err';
+  }
+});
 
 // ---- logs -----------------------------------------------------------------
 const logView = $('logView');

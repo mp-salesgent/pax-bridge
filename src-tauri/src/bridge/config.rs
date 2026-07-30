@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub const DEFAULT_PORT: u16 = 5000;
+
 const DEFAULT_ENV: &str = "# Auto-created on first run — live BroadPOS / TSYS Sierra mode.\nPORT=5000\nPAX_PING_TIMEOUT_MS=10000\nPAX_PAYMENT_TIMEOUT_MS=120000\n";
 
 /// Directory where config + data live in dev (no packaged exe yet).
@@ -108,7 +110,7 @@ fn env_u64(key: &str, default: u64) -> u64 {
 }
 
 pub fn port() -> u16 {
-    std::env::var("PORT").ok().and_then(|v| v.parse::<u16>().ok()).unwrap_or(5000)
+    std::env::var("PORT").ok().and_then(|v| v.parse::<u16>().ok()).unwrap_or(DEFAULT_PORT)
 }
 
 pub fn ping_timeout_ms() -> u64 {

@@ -193,7 +193,23 @@ fn default_settings() -> Value {
         "autoUpdate": true,
         "startBridgeOnLaunch": true,
         "minimizeToTray": true,
+        "port": bridge::config::DEFAULT_PORT,
     })
+}
+
+/// Ports below 1024 need OS privileges on most platforms and well-known ports
+/// above that (like 5432, 3306, ...) are likely to collide with something
+/// else already running — keep the picker in the unprivileged range.
+const MIN_USER_PORT: u64 = 1024;
+const MAX_PORT: u64 = 65535;
+
+fn valid_port(v: &Value) -> Option<u16> {
+    let n = v.as_u64()?;
+    if (MIN_USER_PORT..=MAX_PORT).contains(&n) {
+        Some(n as u16)
+    } else {
+        None
+    }
 }
 
 fn settings_path(app: &AppHandle) -> std::path::PathBuf {
@@ -283,17 +299,29 @@ fn settings_get(app: AppHandle) -> Value {
 }
 
 #[tauri::command]
-fn settings_set(app: AppHandle, patch: Value) -> Value {
+fn settings_set(app: AppHandle, patch: Value) -> Result<Value, String> {
     let mut patch = patch;
-    // The bridge port is fixed, not a user setting — strip it if a caller tries to sneak it in.
     if let Value::Object(map) = &mut patch {
-        map.remove("port");
+        if let Some(port_val) = map.get("port") {
+            match valid_port(port_val) {
+                Some(port) => {
+                    // Takes effect on the next start/restart — config::port() reads
+                    // this env var fresh every time the bridge starts.
+                    std::env::set_var("PORT", port.to_string());
+                }
+                None => {
+                    return Err(format!(
+                        "Port must be a number between {MIN_USER_PORT} and {MAX_PORT}."
+                    ));
+                }
+            }
+        }
     }
     let next = write_settings(&app, patch);
     if let Some(enabled) = next.get("launchAtLogin").and_then(Value::as_bool) {
         apply_autostart(&app, enabled);
     }
-    next
+    Ok(next)
 }
 
 fn open_with_system(target: &str) -> Result<(), String> {
@@ -463,6 +491,12 @@ pub fn run() {
             let start_on_launch = settings.get("startBridgeOnLaunch").and_then(Value::as_bool).unwrap_or(true);
             let launch_at_login = settings.get("launchAtLogin").and_then(Value::as_bool).unwrap_or(false);
             apply_autostart(&handle, launch_at_login);
+            // A saved port (if the merchant picked a non-default one) must be in
+            // the environment before the bridge's first start, since config::port()
+            // just reads $PORT.
+            if let Some(port) = settings.get("port").and_then(valid_port) {
+                std::env::set_var("PORT", port.to_string());
+            }
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

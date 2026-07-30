@@ -243,6 +243,19 @@ main { flex: 1; min-width: 0; overflow: auto; padding: 22px 24px 28px; }
 .setting:last-child { border-bottom: none; padding-bottom: 2px; }
 .setting p { margin: 3px 0 0; font-weight: 400; max-width: 460px; }
 
+.port-control { flex: none; text-align: right; }
+.port-control .form-msg { margin-top: 6px; text-align: right; }
+.port-input {
+  width: 84px; padding: 8px 10px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--line);
+  color: var(--text); font: inherit; font-weight: 500;
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+.port-input:focus {
+  outline: none; border-color: var(--violet);
+  box-shadow: 0 0 0 3px rgba(139, 108, 246, .16);
+}
+
 .switch { position: relative; width: 42px; height: 24px; flex: none; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch span {

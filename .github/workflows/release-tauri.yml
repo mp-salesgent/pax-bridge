@@ -134,6 +134,9 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+          # Stable names (no version) so ERP can use /releases/latest/download/...
+          # → Salesgent.Pax.Bridge_aarch64.dmg | _x64.dmg | _x64-setup.exe
+          releaseAssetNamePattern: "[name]_[arch][setup][ext]"
           args: ${{ matrix.args }}
 
       - name: Upload artifacts
@@ -165,11 +168,11 @@ jobs:
 
           | File | Platform | What is it? |
           |------|----------|-------------|
-          | [*_x64-setup.exe](https://github.com/${OWNER_REPO}/releases/latest) | Windows | NSIS installer |
-          | [*.dmg (aarch64)](https://github.com/${OWNER_REPO}/releases/latest) | macOS Apple Silicon | DMG for M1/M2/M3/M4 |
-          | [*.dmg (x64)](https://github.com/${OWNER_REPO}/releases/latest) | macOS Intel | DMG for Intel Macs |
+          | [Salesgent.Pax.Bridge_x64-setup.exe](https://github.com/${OWNER_REPO}/releases/latest/download/Salesgent.Pax.Bridge_x64-setup.exe) | Windows | NSIS installer |
+          | [Salesgent.Pax.Bridge_aarch64.dmg](https://github.com/${OWNER_REPO}/releases/latest/download/Salesgent.Pax.Bridge_aarch64.dmg) | macOS Apple Silicon | DMG for M1/M2/M3/M4 |
+          | [Salesgent.Pax.Bridge_x64.dmg](https://github.com/${OWNER_REPO}/releases/latest/download/Salesgent.Pax.Bridge_x64.dmg) | macOS Intel | DMG for Intel Macs |
 
-          Pick the asset matching your OS from the Assets list below.
+          Filenames stay the same every release — \`/releases/latest/download/...\` always hits newest.
           EOF
           )
           NOTES=$(printf '%s\n' "$NOTES" | sed 's/^          //')

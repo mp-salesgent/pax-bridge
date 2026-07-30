@@ -23,10 +23,11 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: --target aarch64-apple-darwin --bundles dmg
+            # `app` produces the .app.tar.gz the updater consumes; `dmg` is the download.
+            args: --target aarch64-apple-darwin --bundles app,dmg
             rust_target: aarch64-apple-darwin
           - platform: macos-latest
-            args: --target x86_64-apple-darwin --bundles dmg
+            args: --target x86_64-apple-darwin --bundles app,dmg
             rust_target: x86_64-apple-darwin
           - platform: windows-latest
             args: --bundles nsis
@@ -207,6 +208,30 @@ jobs:
 
           echo "Final assets:"
           gh api "repos/$REPO/releases/tags/$TAG" --jq '.assets[].name'
+
+      - name: Point latest.json at the renamed assets
+        run: |
+          set -euo pipefail
+          # tauri-action writes latest.json with the CLI's original asset names,
+          # but the rename step above changed the Windows installer's name — so
+          # the updater URL 404s unless we rewrite it here. The macOS
+          # .app.tar.gz assets are not renamed, so their URLs stay valid.
+          if ! gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | grep -qx 'latest.json'; then
+            echo "No latest.json in this release (updater disabled) — nothing to patch."
+            exit 0
+          fi
+          gh release download "$TAG" --repo "$REPO" --pattern latest.json --output latest.json --clobber
+          python3 - "https://github.com/$REPO/releases/download/$TAG/$WINDOWS" <<'PY'
+          import json, sys
+          win_url = sys.argv[1]
+          m = json.load(open('latest.json'))
+          for key, val in m.get('platforms', {}).items():
+              if key.startswith('windows-'):
+                  val['url'] = win_url
+          json.dump(m, open('latest.json', 'w'), indent=2)
+          PY
+          cat latest.json
+          gh release upload "$TAG" --repo "$REPO" --clobber latest.json
 
       - name: Upload the logo to the release
         run: |

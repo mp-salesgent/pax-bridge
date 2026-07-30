@@ -446,45 +446,53 @@ pub fn run() {
             app.manage(PaxManaged { runtime: runtime.clone(), is_quitting: is_quitting.clone() });
 
             // --- Tray icon: Open / Restart bridge / Quit ---
-            let open_item = MenuItem::with_id(app, "open", "Open window", true, None::<&str>)?;
-            let restart_item = MenuItem::with_id(app, "restart", "Restart bridge", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&open_item, &restart_item, &quit_item])?;
+            // This is the ONLY tray icon. Do not also declare `app.trayIcon` in
+            // tauri.conf.json: that makes Tauri spawn a second, menu-less icon
+            // next to this one (same image, does nothing when clicked).
+            let settings = read_settings(app);
+            let show_tray = settings.get("showTrayIcon").and_then(Value::as_bool).unwrap_or(true);
 
-            let is_quitting_for_tray = is_quitting.clone();
-            TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().cloned().expect("default window icon should be embedded via tauri.conf.json bundle.icon"))
-                .tooltip("Salesgent Pax Bridge")
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(move |app, event| match event.id.as_ref() {
-                    "open" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+            if show_tray {
+                let open_item = MenuItem::with_id(app, "open", "Open window", true, None::<&str>)?;
+                let restart_item = MenuItem::with_id(app, "restart", "Restart bridge", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let tray_menu = Menu::with_items(app, &[&open_item, &restart_item, &quit_item])?;
+
+                let is_quitting_for_tray = is_quitting.clone();
+                TrayIconBuilder::with_id("main-tray")
+                    .icon(app.default_window_icon().cloned().expect("default window icon should be embedded via tauri.conf.json bundle.icon"))
+                    .tooltip("Salesgent Pax Bridge")
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(move |app, event| match event.id.as_ref() {
+                        "open" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
-                    }
-                    "restart" => {
-                        let app2 = app.clone();
-                        let rt2 = app.state::<PaxManaged>().runtime.clone();
-                        tauri::async_runtime::spawn(async move { restart_bridge_internal(app2, rt2).await });
-                    }
-                    "quit" => {
-                        is_quitting_for_tray.store(true, Ordering::SeqCst);
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { .. } = event {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                        "restart" => {
+                            let app2 = app.clone();
+                            let rt2 = app.state::<PaxManaged>().runtime.clone();
+                            tauri::async_runtime::spawn(async move { restart_bridge_internal(app2, rt2).await });
                         }
-                    }
-                })
-                .build(app)?;
+                        "quit" => {
+                            is_quitting_for_tray.store(true, Ordering::SeqCst);
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click { .. } = event {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    })
+                    .build(app)?;
+            }
 
             // --- Apply persisted settings ---
             let settings = read_settings(&handle);

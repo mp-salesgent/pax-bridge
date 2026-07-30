@@ -142,6 +142,7 @@ async function loadSettings() {
   $('setLogin').checked = s.launchAtLogin;
   $('setAutostart').checked = s.startBridgeOnLaunch;
   $('setTray').checked = s.minimizeToTray;
+  $('setShowTray').checked = s.showTrayIcon ?? true;
   $('setAutoUpdate').checked = s.autoUpdate;
   $('setPort').value = s.port ?? state.port;
 }
@@ -149,6 +150,7 @@ const bindToggle = (id, key) => $(id).addEventListener('change', (e) => pax.sett
 bindToggle('setLogin', 'launchAtLogin');
 bindToggle('setAutostart', 'startBridgeOnLaunch');
 bindToggle('setTray', 'minimizeToTray');
+bindToggle('setShowTray', 'showTrayIcon');
 bindToggle('setAutoUpdate', 'autoUpdate');
 
 $('portForm').addEventListener('submit', async (e) => {

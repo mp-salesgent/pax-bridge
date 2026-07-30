@@ -14,6 +14,13 @@ document.querySelectorAll('.tab').forEach((t) => {
 });
 
 // ---- status ---------------------------------------------------------------
+const STATUS_HINT = {
+  running: 'Serving requests. Payments can be taken now.',
+  starting: 'Starting up…',
+  stopped: 'Not running — press Start before taking payments.',
+  error: 'The bridge stopped unexpectedly. Check the Logs tab.',
+};
+
 function paintStatus(s) {
   state.status = s.status;
   state.port = s.port ?? state.port;
@@ -23,6 +30,8 @@ function paintStatus(s) {
   $('glanceStatus').textContent = s.status;
   $('glancePort').textContent = state.port;
   $('bridgeUrl').textContent = `http://localhost:${state.port}`;
+  $('heroBeacon').className = `beacon ${s.status}`;
+  $('heroHint').textContent = STATUS_HINT[s.status] || s.status;
   const running = s.status === 'running';
   $('btnStart').disabled = running || s.status === 'starting';
   $('btnStop').disabled = !running && s.status !== 'error';

@@ -166,7 +166,10 @@ jobs:
       MAC_ARM: Salesgent-Pax-Bridge-macOS-Apple-Silicon.dmg
       MAC_INTEL: Salesgent-Pax-Bridge-macOS-Intel.dmg
       WINDOWS: Salesgent-Pax-Bridge-Windows-Setup.exe
+      LOGO: Salesgent-Pax-Bridge-Logo.png
     steps:
+      - uses: actions/checkout@v4
+
       - name: Wait for the release to exist
         run: |
           for _ in $(seq 1 20); do
@@ -205,13 +208,26 @@ jobs:
           echo "Final assets:"
           gh api "repos/$REPO/releases/tags/$TAG" --jq '.assets[].name'
 
+      - name: Upload the logo to the release
+        run: |
+          set -euo pipefail
+          # gh release upload keeps the local filename as the asset name, so
+          # copy to the name we want the download URL to have.
+          cp src/renderer/logo.png "$LOGO"
+          gh release upload "$TAG" --repo "$REPO" --clobber "$LOGO"
+
       - name: Write the download guide
         run: |
           set -euo pipefail
           # /releases/latest/download/<file> always resolves to the newest release,
           # so these URLs never change and the ERP never needs a version bump.
           BASE="https://github.com/$REPO/releases/latest/download"
+          # Pinned to this exact release (not /latest/) so the notes always show
+          # the logo that shipped with this version, even after newer releases.
+          LOGO_URL="https://github.com/$REPO/releases/download/$TAG/$LOGO"
           {
+            echo "<img src=\"$LOGO_URL\" alt=\"Salesgent Pax Bridge\" width=\"96\" />"
+            echo
             echo '## Download the right file for your computer'
             echo
             echo '| Your computer | Download | How to know it is you |'

@@ -802,6 +802,23 @@ app.use('/api/payments', paymentsRouter);
 const server = http.createServer(app);
 attachWebSocket(server);
 
+// Without this, a bind failure (e.g. EADDRINUSE) is an unhandled 'error' event
+// on the server and Node crashes with a raw stack trace instead of a message
+// a merchant can act on.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `Port ${PORT} is already in use, so the bridge could not start. ` +
+        `On macOS this is usually the built-in AirPlay Receiver (System Settings ` +
+        `→ General → AirDrop & Handoff → turn off "AirPlay Receiver"), or another ` +
+        `copy of this app already running. Quit whatever is using port ${PORT} and reopen.`
+    );
+  } else {
+    console.error(`Failed to start server: ${err.message}`);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
   console.log(`WebSocket lifecycle events on ws://localhost:${PORT}/ws`);

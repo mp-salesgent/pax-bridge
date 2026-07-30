@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub enum Target {
@@ -49,6 +50,42 @@ struct TerminalQueue {
 }
 
 static QUEUES: OnceLock<StdMutex<HashMap<String, Arc<TerminalQueue>>>> = OnceLock::new();
+
+/// Cancellation tokens for commands currently in flight, keyed by terminal.
+/// Lets `cancel()` abort a card prompt the cashier no longer wants to wait on.
+static CANCELS: OnceLock<StdMutex<HashMap<String, CancellationToken>>> = OnceLock::new();
+
+fn cancels() -> &'static StdMutex<HashMap<String, CancellationToken>> {
+    CANCELS.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+/// Abort the in-flight command for this terminal, if any.
+///
+/// This drops the ECR connection mid-transaction, which is what releases the
+/// terminal from the prompt. It is NOT a protocol-level "void": if the card was
+/// already authorized in the split second before cancelling, the cancel does not
+/// reverse it — callers must treat the outcome as unknown and verify.
+/// Returns false if nothing was in flight.
+pub fn cancel(terminal: &Terminal) -> bool {
+    let key = Target::from_terminal(terminal).key();
+    let guard = cancels().lock().unwrap();
+    match guard.get(&key) {
+        Some(token) => {
+            token.cancel();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Removes this terminal's cancel token when the command finishes, so a later
+/// cancel can never abort an unrelated command.
+struct CancelGuard(String);
+impl Drop for CancelGuard {
+    fn drop(&mut self) {
+        cancels().lock().unwrap().remove(&self.0);
+    }
+}
 
 fn queues() -> &'static StdMutex<HashMap<String, Arc<TerminalQueue>>> {
     QUEUES.get_or_init(|| StdMutex::new(HashMap::new()))
@@ -96,9 +133,27 @@ async fn send_command(terminal: &Terminal, fields: Vec<Field>, timeout_ms: u64, 
     let expected = protocol::response_for(&command).map(|s| s.to_string());
     let request = protocol::build_message(&fields);
 
-    match target {
-        Target::Tcp { ip, port } => tcp::send_command(&ip, port, &request, expected.as_deref(), timeout_ms, on_state).await,
-        Target::Usb { path, baud_rate } => serial::send_command(&path, baud_rate, request, expected, timeout_ms, on_state).await,
+    // Registered only now that we hold the queue lock, so the token always
+    // belongs to the command actually on the wire.
+    let token = CancellationToken::new();
+    cancels().lock().unwrap().insert(key.clone(), token.clone());
+    let _cancel_guard = CancelGuard(key);
+
+    let send = async {
+        match target {
+            Target::Tcp { ip, port } => tcp::send_command(&ip, port, &request, expected.as_deref(), timeout_ms, on_state).await,
+            Target::Usb { path, baud_rate } => serial::send_command(&path, baud_rate, request, expected, timeout_ms, on_state).await,
+        }
+    };
+
+    // Dropping `send` on cancel closes the socket / serial handle, which is what
+    // releases the terminal from its card prompt.
+    tokio::select! {
+        result = send => result,
+        _ = token.cancelled() => Err(PaxError::new(
+            "CANCELED",
+            "Cancelled from the point of sale before the terminal responded.",
+        )),
     }
 }
 

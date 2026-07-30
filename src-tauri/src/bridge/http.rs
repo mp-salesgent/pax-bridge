@@ -450,7 +450,38 @@ async fn run_payment(
             (http_status, body, updated)
         }
         Err(err) => {
-            if err.code == "TIMEOUT" {
+            if err.code == "CANCELED" {
+                // The connection was dropped mid-prompt, so the terminal never
+                // reported back. Almost always this means no card was charged,
+                // but a race (card approved microseconds before the cancel
+                // landed) can't be ruled out from here — flag it as unknown so
+                // the POS tells the cashier to verify rather than silently
+                // assuming nothing happened.
+                let mut patch = Map::new();
+                patch.insert("status".into(), json!("CANCELED"));
+                patch.insert("unknown".into(), json!(true));
+                patch.insert("error".into(), json!({ "code": "CANCELED", "message": err.message }));
+                let updated = {
+                    let mut db = state.db.lock().await;
+                    db.update_transaction(&txn_id, patch)
+                }
+                .unwrap_or_else(|| txn.clone());
+
+                tracing::warn!(
+                    "[payment] {} CANCELED — txnId={} ecrRefNum={} terminal=\"{}\" amount={} — cancelled from the POS; confirm the terminal returned to idle and no receipt printed.",
+                    tx_type,
+                    txn_id,
+                    ecr_ref_num,
+                    terminal.name,
+                    fmt_money(amount_cents),
+                );
+                state.ws.emit(json!({ "type": "CANCELED", "txnId": txn_id.clone(), "ecrRefNum": ecr_ref_num.clone() }));
+
+                let (_, err_body) = pax_error_body(&err);
+                let mut body = json!({ "transaction": Value::Object(updated.clone()) });
+                merge_json(&mut body, err_body);
+                (StatusCode::CONFLICT, body, updated)
+            } else if err.code == "TIMEOUT" {
                 let mut patch = Map::new();
                 patch.insert("status".into(), json!("TIMEOUT"));
                 patch.insert("unknown".into(), json!(true));
@@ -640,6 +671,53 @@ async fn get_payment(State(state): State<AppState>, Path(id): Path<String>) -> (
     }
 }
 
+/// Abort a transaction that is still waiting on the terminal, so the cashier
+/// isn't stuck until the payment timeout. The in-flight request's own handler
+/// (`run_payment`) is what writes the CANCELED status and emits the WS event
+/// once its connection drops — this endpoint only fires the trigger.
+async fn cancel_payment(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<Value>) {
+    let txn = { state.db.lock().await.get_transaction(&id) };
+    let txn = match txn {
+        Some(t) => t,
+        None => return not_found("Transaction not found"),
+    };
+
+    let status = txn.get("status").and_then(Value::as_str).unwrap_or("");
+    if status != "PENDING" {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": {
+                "code": "NOT_CANCELABLE",
+                "message": format!("Transaction already finished with status {status}."),
+                "hint": "Only a payment still waiting on the terminal can be cancelled."
+            }})),
+        );
+    }
+
+    let terminal_id = txn.get("terminalId").and_then(Value::as_str).unwrap_or_default().to_string();
+    let terminal = { state.db.lock().await.get_terminal(&terminal_id) };
+    let terminal = match terminal {
+        Some(t) => t,
+        None => return not_found("Terminal for this transaction no longer exists"),
+    };
+
+    if transport::cancel(&terminal) {
+        tracing::warn!("[payment] cancel requested — txnId={} terminal=\"{}\"", id, terminal.name);
+        (StatusCode::OK, Json(json!({ "canceled": true, "txnId": id })))
+    } else {
+        // Nothing on the wire: it already completed or was never sent. The
+        // caller should re-read the transaction to see where it actually landed.
+        (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": {
+                "code": "NOT_IN_FLIGHT",
+                "message": "No command is currently in flight for this terminal.",
+                "hint": "The payment may have just completed — check its status before retrying."
+            }})),
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Misc routes
 // ---------------------------------------------------------------------------
@@ -670,7 +748,8 @@ pub fn router(state: AppState) -> Router {
         .route("/refund", post(refund_payment))
         .route("/void", post(void_payment))
         .route("/", get(list_payments))
-        .route("/{id}", get(get_payment));
+        .route("/{id}", get(get_payment))
+        .route("/{id}/cancel", post(cancel_payment));
 
     Router::new()
         .route("/api/health", get(health))

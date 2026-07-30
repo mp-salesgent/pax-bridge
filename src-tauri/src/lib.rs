@@ -449,8 +449,7 @@ pub fn run() {
             // This is the ONLY tray icon. Do not also declare `app.trayIcon` in
             // tauri.conf.json: that makes Tauri spawn a second, menu-less icon
             // next to this one (same image, does nothing when clicked).
-            let settings = read_settings(app);
-            let show_tray = settings.get("showTrayIcon").and_then(Value::as_bool).unwrap_or(true);
+            let show_tray = read_settings(&handle).get("showTrayIcon").and_then(Value::as_bool).unwrap_or(true);
 
             if show_tray {
                 let open_item = MenuItem::with_id(app, "open", "Open window", true, None::<&str>)?;

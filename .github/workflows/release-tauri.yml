@@ -165,12 +165,13 @@ jobs:
           OWNER_REPO="${{ github.repository }}"
           NOTES=$(cat <<EOF
           ## Download the right file for your system
+          > Use only files below. Ignore GitHub "Source code (zip/tar.gz)".
 
           | File | Platform | What is it? |
           |------|----------|-------------|
-          | [Salesgent.Pax.Bridge_x64-setup.exe](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_x64-setup.exe) | Windows | NSIS installer |
-          | [Salesgent.Pax.Bridge_aarch64.dmg](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_aarch64.dmg) | macOS Apple Silicon | DMG for M1/M2/M3/M4 |
-          | [Salesgent.Pax.Bridge_x64.dmg](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_x64.dmg) | macOS Intel | DMG for Intel Macs |
+          | [Salesgent.Pax.Bridge_aarch64.dmg](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_aarch64.dmg) | macOS Apple Silicon | For M1/M2/M3/M4 Macs |
+          | [Salesgent.Pax.Bridge_x64.dmg](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_x64.dmg) | macOS Intel | For Intel Macs |
+          | [Salesgent.Pax.Bridge_x64-setup.exe](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_x64-setup.exe) | Windows | Windows installer |
 
           Filenames stay same every release — \`/releases/download/latest/...\` always hits newest.
           EOF

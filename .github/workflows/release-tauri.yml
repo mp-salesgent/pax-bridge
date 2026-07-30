@@ -134,9 +134,9 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          # Stable names (no version) so ERP can use /releases/download/latest/...
-          # → Salesgent.Pax.Bridge_aarch64.dmg | _x64.dmg | _x64-setup.exe
-          releaseAssetNamePattern: "[name]_[arch][setup][ext]"
+          # tauri-action@v0 has no asset-rename input, so the CLI names still carry
+          # the version. The `release-notes` job renames them to fixed names after
+          # upload — that is what keeps the ERP download URLs constant.
           args: ${{ matrix.args }}
 
       - name: Upload artifacts
@@ -153,34 +153,82 @@ jobs:
           retention-days: 7
 
   release-notes:
+    # Renames the uploaded assets to version-less names and writes the download
+    # table. Keep the names in sync with:
+    #   erp-frontend/src/modules/shared/paymentTerminal/bridgeDownload.js
     if: always() && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      MAC_ARM: Salesgent-Pax-Bridge-macOS-Apple-Silicon.dmg
+      MAC_INTEL: Salesgent-Pax-Bridge-macOS-Intel.dmg
+      WINDOWS: Salesgent-Pax-Bridge-Windows-Setup.exe
     steps:
-      - name: Set download guide on release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+      - name: Wait for the release to exist
         run: |
-          OWNER_REPO="${{ github.repository }}"
-          NOTES=$(cat <<EOF
-          ## Download the right file for your system
-          > Use only files below. Ignore GitHub "Source code (zip/tar.gz)".
-
-          | File | Platform | What is it? |
-          |------|----------|-------------|
-          | [Salesgent.Pax.Bridge_aarch64.dmg](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_aarch64.dmg) | macOS Apple Silicon | For M1/M2/M3/M4 Macs |
-          | [Salesgent.Pax.Bridge_x64.dmg](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_x64.dmg) | macOS Intel | For Intel Macs |
-          | [Salesgent.Pax.Bridge_x64-setup.exe](https://github.com/${OWNER_REPO}/releases/download/latest/Salesgent.Pax.Bridge_x64-setup.exe) | Windows | Windows installer |
-
-          Filenames stay same every release — \`/releases/download/latest/...\` always hits newest.
-          EOF
-          )
-          NOTES=$(printf '%s\n' "$NOTES" | sed 's/^          //')
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if gh release view "$TAG" >/dev/null 2>&1; then
-              gh release edit "$TAG" --notes "$NOTES" && exit 0
-            fi
+          for _ in $(seq 1 20); do
+            gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && exit 0
             sleep 6
           done
-          echo "::warning::Release $TAG not found"
+          echo "::error::Release $TAG not found"
+          exit 1
+
+      - name: Rename assets to fixed, version-less names
+        run: |
+          set -euo pipefail
+          # NOTE: if the updater is ever enabled (TAURI_SIGNING_PRIVATE_KEY set),
+          # latest.json is generated with the pre-rename URLs and must be patched too.
+          rename() { # $1 = current asset name, $2 = target name
+            if [ "$1" = "$2" ]; then return 0; fi
+            ID=$(gh api "repos/$REPO/releases/tags/$TAG" \
+                  --jq ".assets[] | select(.name == \"$1\") | .id")
+            if [ -z "$ID" ]; then return 0; fi
+            echo "Renaming $1 -> $2"
+            gh api --method PATCH "repos/$REPO/releases/assets/$ID" \
+              -f name="$2" -f label="$2" >/dev/null
+          }
+
+          gh api "repos/$REPO/releases/tags/$TAG" --jq '.assets[].name' > assets.txt
+          cat assets.txt
+
+          while read -r NAME; do
+            case "$NAME" in
+              *aarch64*.dmg)  rename "$NAME" "$MAC_ARM" ;;
+              *x64*.dmg)      rename "$NAME" "$MAC_INTEL" ;;
+              *setup.exe)     rename "$NAME" "$WINDOWS" ;;
+            esac
+          done < assets.txt
+
+          echo "Final assets:"
+          gh api "repos/$REPO/releases/tags/$TAG" --jq '.assets[].name'
+
+      - name: Write the download guide
+        run: |
+          set -euo pipefail
+          # /releases/latest/download/<file> always resolves to the newest release,
+          # so these URLs never change and the ERP never needs a version bump.
+          BASE="https://github.com/$REPO/releases/latest/download"
+          {
+            echo '## Download the right file for your computer'
+            echo
+            echo '| Your computer | Download | How to know it is you |'
+            echo '|---|---|---|'
+            echo "| **Mac — Apple Silicon** (M1/M2/M3/M4) | [$MAC_ARM]($BASE/$MAC_ARM) | Apple menu → About This Mac shows a *Chip* like \"Apple M2\" |"
+            echo "| **Mac — Intel** | [$MAC_INTEL]($BASE/$MAC_INTEL) | Apple menu → About This Mac shows a *Processor* like \"Intel Core i5\" |"
+            echo "| **Windows** (64-bit) | [$WINDOWS]($BASE/$WINDOWS) | Any Windows 10 or 11 PC |"
+            echo
+            echo 'Ignore the "Source code (zip / tar.gz)" files — those are not the app.'
+            echo
+            echo "Not sure which Mac you have? The Apple Silicon build is the right"
+            echo 'answer for any Mac bought from late 2020 onward.'
+            echo
+            echo '### For developers'
+            echo
+            echo "File names never include the version, and \`/releases/latest/download/...\`"
+            echo 'always points at the newest release — so links embedded in the ERP stay valid'
+            echo 'forever and need no update when a new version ships.'
+          } > notes.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
